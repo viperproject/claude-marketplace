@@ -429,7 +429,7 @@ The missing fact is always the same one: **`type(x) == int`**. State it where yo
 | `int` field | `type(self.n) == int` next to `Acc(self.n)` in the predicate / postcondition of `__init__` |
 | contents of a `List[int]` / `Set[int]` / `PSeq[int]` | `Forall(xs, lambda e: (type(e) == int, []))` in the same pre/post/invariant as `list_pred(xs)` — the element form; it is preserved across `append` of exact ints and through loops that build the list, whereas the index form `Forall(int, lambda i: Implies(0 <= i and i < len(xs), type(xs[i]) == int))` needs extra frame assertions after each mutation |
 | loop counter / accumulator | `Invariant(type(i) == int)` (preserved by `i += 1`) |
-| `Forall(int, ...)` whose body identifies `i` (membership, `@ContractOnly`) | add `type(i) == int` to the guard: `Implies(type(i) == int and lo <= i and i < hi, ...)` |
+| `Forall(int, ...)` whose body identifies `i` (membership, `@ContractOnly`) | add `type(i) == int` to the guard: `Implies(type(i) == int and lo <= i and i < hi, ...)`. The guard then has to be discharged at every use: the concrete index must carry its own `type(x) == int` fact (parameter: `Requires`; local: `Assert`), or the instantiation silently fails. Leave the guard out when the body does not need it |
 
 ### Size limits
 
@@ -530,7 +530,9 @@ def quicksort(arr: List[int]) -> List[int]:
     quicksort(more)
 ```
 
-For loops inside any method:
+Every call in the body must have a measure strictly below the caller's. Builtin calls count — list construction, `append`, etc. have measure 1 — so any method that calls anything needs at least `MustTerminate(2)`; with `MustTerminate(1)` the first such call fails. For non-recursive methods, just pick a comfortably large constant.
+
+A loop inside a `MustTerminate` method must carry its own termination invariant:
 
 ```python
 while condition:
@@ -538,7 +540,7 @@ while condition:
     # ...
 ```
 
-The value of the loop's MT measure *at exit* is the "budget" available to any code that follows the loop.
+The loop's measure must strictly decrease each iteration, and is independent of the method's measure. The method's measure is unchanged by the loop, so code after it, and calls inside it, are bounded by the *method's* measure as everywhere else, not by the loop's value.
 
 ### Non-pure methods without `MustTerminate`
 

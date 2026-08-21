@@ -40,7 +40,7 @@ Transform the error into a failing assertion.
 
 **For branches/multiple returns**: Do *not* assume which branch is the problem. Add asserts to each branch / before each return to find out which one fails.
 
-**For a whole-run timeout** (`TimeoutOccurred`, no position, no diagnostics — the one failure that arrives without a located error): localize manually by commenting out proof obligations until the run completes, or insert `Assert(False)` before a suspect obligation to confirm the run reaches it.
+**For a whole-run timeout** (`TimeoutOccurred`, no position, no diagnostics): localize manually by commenting out proof obligations until the run completes, or inserting `Assert(False)` before a suspect obligation to confirm the run reaches it. Everything after `Assert(False)` verifies vacuously, so walking it down the body and diffing the durations shows which region the time belongs to.
 
 **Separate conjunctions**: If the error occurs for a conjunction of properties, determine which clause is failing:
 - Multiple postconditions/invariants: assert each individually
@@ -75,7 +75,9 @@ Bulk fields — the full SMT session (`proverEmits`), the background axioms (`pr
 
 Reading terms: `x@3@05` is a symbolic constant for program variable `x` (numbers are internal versions — successive assignments create new versions). Integers are boxed: `__prim__int___box__`/`int___unbox__` wrap between Python ints and SMT ints, and `_checkDefined(_, x, id)` wraps variable reads (it is identity on the value). `QA x :: body` is a universal quantifier. Pure functions appear applied to a snapshot argument first (`ipow(_, b, e)`).
 
-A `TimeoutOccurred` diagnostic saying the whole-run `--timeout` expired means that the run's global budget ran out while every individual check stayed within its per-check budget — typically a member whose encoding fans out into thousands of small queries. In this case, it can make sense to re-run with a 2x `--timeout`. Going beyond 2x rarely helps, so if it still times out, decompose the member or simplify its spec.
+Every result carries `timings`: seconds spent in each pipeline phase (`typecheck`, `translate`, `chop`, `verify`), and timeout diagnostics repeat them. Read them before diagnosing any timeout. If `translate` or `chop` dominates, the program is pathological to *encode*, not to prove, so shrink or split the member being encoded. Only when `verify` dominates does the rest of this section apply.
+
+A `TimeoutOccurred` for the whole-run `--timeout` means the global budget expired while every individual check stayed within its per-check budget. With a low `assertTimeout` that is a branching problem, not a slow-query one: the member fans out too many sub-budget queries (a path per impure conditional, every `Assert` re-proved on each). Treat it as path explosion and apply the bottleneck classification and path-cutting strategies below. A single 2x `--timeout` re-run is a fair probe; beyond 2x more budget rarely helps — decompose rather than re-budget.
 
 
 #### Interpreting `reasonUnknown`
@@ -84,7 +86,7 @@ For most failures, start by understanding why the SMT-query failed, which is giv
 | Value | Meaning | Strategy |
 |---|---|---|
 | `(incomplete quantifiers)` | E-matching gave up: the instantiation chain to the proof was never triggered (under-instantiation). More solver time will not help. | Restate the missing fact as a GROUND fact placed where it is always visible: as a postcondition or a local `Assert`. Add only facts the payload shows are missing: speculative extra ground facts feed the instantiation engine and can slow everything down. For quantified goals, also check TRIGGER VOCABULARY: do the premise quantifiers' trigger terms occur under the goal's binder? If not, add a bridging quantified `Assert` whose trigger matches the goal's vocabulary and whose body mentions the premise triggers. |
-| `canceled` | The budget ran out while the solver was still working. | One diagnostic probe is worth it: re-run once with ~10x `assertTimeout` and read `rlimitDelta`. If it stops well below the new budget (reason flips to an incompleteness class), time was never the issue. If it scales with the budget, the proof is genuinely slow: apply the performance strategies below rather than re-budgeting further. |
+| `canceled` | The budget ran out while the solver was still working. | One diagnostic probe is worth it: re-run once with ~10x `assertTimeout` and read `rlimitDelta`. If it stops well below the new budget (reason flips to an incompleteness class), time was never the issue. If it scales with the budget, the proof is genuinely slow: a budget of up to 10x the default is an acceptable fix if the check closes within it; beyond 10x, apply the performance strategies below rather than re-budgeting further. On a budget-bound check, prefer cutting context or paths over adding asserts (see the performance strategies). |
 | `(incomplete (theory arithmetic))` | Nonlinear integer arithmetic (products, `//`, `%` of variables) is beyond the solver. | More time will not help. Restate the proof with stepping stones that avoid division/modulo OF PRODUCTS entirely: use the Euclid identity (`a == (a // d) * d + a % d`), pure polynomial identities (products may appear; the solver normalizes them), and the bounded-multiple inference (`0 <= m * d < d` implies `m == 0`). `(k * d) // d == k` and `(k * d) % d == 0` are NOT directly provable — derive them via the chain above. |
 
 #### Interpreting `state.heap`
@@ -234,9 +236,15 @@ When a fold fails, assert each component of the predicate body separately (witho
 
 Verification time ≈ number of symbolic execution paths × cost per SMT query. Query cost is dominated by the proof context: every axiom, pure-function body, path condition, and heap chunk in scope alongside the goal. Slowness is too many paths, too much context, or both; the two multiply.
 
+What healthy looks like: a single-member verification takes seconds to low tens of seconds; contract-only stubs, predicates and small pure functions a few seconds; the per-check budget is rarely touched. A member that takes minutes is an outlier with a structural cause, not "a big function" — and slow verification is usually many cheap queries (paths × obligations), not a few hard ones. Slow predicates and small pure functions are frequently the real culprit behind a slow method, because their cost is paid again at every unfold or call site: look there before tuning the method. After a performance change, compare the member's duration (`timings`) and revert it if it did not win.
+
+Asserts cut both ways. A stepping-stone `Assert` that supplies a fact the solver was missing makes the checks after it cheaper — that is the fix for an under-instantiated goal (see the `(incomplete quantifiers)` row above). But on a check that is budget-bound and making progress rather than fact-starved, each added assert is one more query against the same budget: there, cut context or paths instead of adding proof steps. The `debug` payload tells the two apart — `reasonUnknown` and whether `rlimitDelta` sits at the cap.
+
 **Shrink the proof context:**
 - Keep predicates folded in loop invariants; `Unfold`/`Fold` inside the body, `Unfolding(...)` for value reads. An unfolded predicate costs as much as no predicate.
-- Hide quantified facts inside predicates; expose them locally where needed.
+- Split branchy predicates: a predicate body with N impure implications (`Implies(x.f is not None, P(x.f))`) forks 2^N paths at every unfold site. Move each implication into its own predicate, unfolded on demand.
+- Avoid sequence slicing in specs: nested `take`/`drop` terms are among the most expensive obligations, and the cost lands on every caller of the function that mentions them. Define properties in index form or as recursive range functions instead. A cheap-looking `Assert` that introduces one `take`/`drop` term is not cheap: terms persist in the context, assertions do not.
+- Hide quantified facts inside predicates; expose them locally where needed. Contracts that are slow merely to check as `@ContractOnly` stubs need this first: predicate + `@Pure` accessors (see the spec-quality skill's Performance by Design).
 - Move proof steps into a lemma: a lemma's proof context is exactly its precondition, and its facts reach the caller only through its postcondition.
 - Split large methods; extract inner loops into helper methods with contracts.
 
@@ -253,7 +261,7 @@ Verification time ≈ number of symbolic execution paths × cost per SMT query. 
 
 **Termination last:** comment out `Decreases()`/`MustTerminate` measures, verify partial correctness first, and restore them once the functional proof passes.
 
-**Bottleneck classification via `viper_args`:** overrides are diagnostic only — the fix must pass under default flags. A member that verifies only under a flag has identified its bottleneck class, which picks the strategy above:
+**Bottleneck classification via `viper_args`:** A member that verifies only under a flag has identified its bottleneck class, which picks the strategy above:
 - `--moreJoins 1` (join branches after impure conditionals): passes now → path explosion; cut paths.
 - `--exhaleMode 0` (greedy heap reasoning; incomplete under disjunctive aliasing, so a *new* error under it proves nothing): passes now → heap-exhale cost; shrink the permission footprint and keep predicates folded.
 
