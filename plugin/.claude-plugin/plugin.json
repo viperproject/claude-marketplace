@@ -1,7 +1,7 @@
 {
   "name": "nagini",
   "displayName": "Nagini Verification",
-  "description": "Formal verification of Python programs with Nagini: language reference and error-handling skills, and in-session verify tools via MCP.",
+  "description": "Formal verification of Python programs with Nagini: language reference, error-handling, and performance skills, and in-session verify tools via MCP.",
   "author": { "name": "Viper Project", "url": "https://github.com/viperproject" },
   "repository": "https://github.com/viperproject/nagini-claude-plugin",
   "license": "MPL-2.0",

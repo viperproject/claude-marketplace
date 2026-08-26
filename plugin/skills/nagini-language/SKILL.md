@@ -37,6 +37,8 @@ The result cache keys entries on the file content and backend, verifier flags ar
 
 Only *methods* are cached: pure functions and predicates re-pay their full verification cost on every call.
 
+Re-verifying an unchanged member is waste either way — a cached method replays its old result, an uncached member re-pays its cost for the identical outcome.
+
 ## Resources
 
 ### references/nagini-language.md

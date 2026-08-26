@@ -111,6 +111,8 @@ def increment(self: Counter) -> None:
     self.count = self.count + 1
 ```
 
+`Old` of a reference-typed expression yields the old *reference*, not a snapshot of the object's contents. A container field still holds the same object after a call, so `self.xs == Old(self.xs)` compares a reference with itself and states nothing about the contents.
+
 ### Previous (for-loops only)
 
 In a `for x in xs:` loop, `Previous(x)` is the PSeq of the loop variable's values from all previous iterations:
@@ -246,18 +248,6 @@ def client() -> None:
 ### Property getters are implicitly pure
 
 A `@property` getter is treated as a pure function automatically. Do not stack `@Pure` on it.
-
-### Heap snapshots
-
-A heap-reading `@Pure` function is encoded for the solver as a mathematical function of its arguments *and a snapshot* — a term bundling the values of every heap location the function may read. Two applications of `f` at different program points are equal only if their snapshots can be proven equal; the solver never identifies "the same call" across states on its own.
-
-The verifier knows a location's value only through a permission it currently holds. Exhaling a permission discards that knowledge; inhaling one binds the location to a fresh unknown — this is exactly what makes framing sound, since whoever held the permission could have written anything. A loop head does the same wholesale: the body is verified for an arbitrary iteration, starting from a state where every location the invariant grants permission to holds a fresh unknown constrained only by what the invariant states.
-
-An application of `f` after such a permission round-trip is therefore a function of fresh unknowns, equal to the pre-state application only if the specification supplies the connection — per-location equalities (`self.x == Old(self.x)`), or the function's value directly (`f(self) == Old(f(self))`). Concretely:
-
-- In an `Ensures` list, a clause that reads through an `Acc` must come textually after the clause granting it: clauses are processed left to right, and the read needs the freshly granted permission and its value binding.
-- A fact about `f(x)` proven before a call or a loop must be restated to hold after it — in the callee's `Ensures`, or in a loop `Invariant`.
-- A termination measure is evaluated once, against the entry snapshot, with no place to restate the connection: a heap-reading measure (`MustTerminate(count(self.data))`) cannot be re-related once a loop has round-tripped the permissions.
 
 ## ContractOnly Functions
 
