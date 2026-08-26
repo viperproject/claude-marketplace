@@ -1,6 +1,6 @@
 # Proof Construction
 
-Patterns and techniques for proving lemma bodies in Nagini when the SMT solver needs explicit help.
+Patterns and techniques for writing proof annotations in Nagini — loop invariants and lemma bodies — when the SMT solver needs explicit help.
 
 ## Writing proofs
 
@@ -15,6 +15,17 @@ When writing a proof body to make a lemma verify, follow these two rules:
 Verify after each addition. Stop as soon as verification succeeds.
 
 **Never pre-plan a full proof.** Do not look at the lemma and think "this will need induction with three cases and two helper lemmas" before trying anything. That reasoning leads to proof bloat. Let the verifier fail first, then react to what it actually needs.
+
+---
+
+## Loop Invariant Structure
+
+A complete set of loop invariants typically covers:
+1. **Bounds**: `0 <= i and i <= n`
+2. **Permissions**: `Acc(list_pred(items))` or `Acc(obj.field)`
+3. **Progress property**: what has been computed for elements `[0..i)`
+4. **Current state**: properties of loop variables
+5. **Pure function facts**: restate pure-function preconditions the loop body needs (e.g., `Invariant(is_sorted(ToSeq(a)))`)
 
 ---
 

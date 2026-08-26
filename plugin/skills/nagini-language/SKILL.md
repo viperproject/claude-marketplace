@@ -33,7 +33,9 @@ Pass/fail is the `success` field. `translationFailed: true` marks syntax/type/tr
 
 `mcp__nagini__cancel(job_token)` cancels an in-flight verification; `mcp__nagini__flush_cache()` clears the verification result cache.
 
-The result cache keys entries on the file content and backend only — verifier flags are NOT part of the key. So setting flags and re-running (e.g. other values of `--assertTimeout`, `--timeout`) will lead to cache hits on the old values of the flags. Call `flush_cache()` (or pass `--disableCaching`) whenever re-verifying with raised budgets.
+The result cache keys entries on the file content and backend, verifier flags are NOT part of the key. So setting flags and re-running (e.g. other values of `--assertTimeout`, `--timeout`) will lead to cache hits on the old values of the flags; served failures carry a `[note: result served from the verification cache …]` marker. Call `flush_cache()` (or pass `--disableCaching`) whenever re-verifying with raised budgets.
+
+Only *methods* are cached: pure functions and predicates re-pay their full verification cost on every call.
 
 ## Resources
 
@@ -43,8 +45,8 @@ Core language reference: imports, contracts, permissions, predicates, pure funct
 ### references/nagini-advanced.md
 Advanced features beyond the core: exception contracts (`Exsures`, `RaisedException`), global/module-level variables, threads (`Thread`, `MayStart`, `Joinable`, `ThreadPost`, the `Joinable` conjunct bug). Load this only when working with code that raises exceptions, mutates module-level state, or spawns threads.
 
-### references/capabilities.md
-Confirmed Nagini capabilities and limitations — what the language can and cannot express, with workarounds. Consult before concluding that a property is inexpressible or that a workaround is needed; cited as the canonical authority for "is X really a Nagini limitation?" decisions.
+### references/limitations.md
+Confirmed Nagini limitations — what the language cannot express or prove, with workarounds. Consult before concluding that a property is inexpressible or that a workaround is needed; cited as the canonical authority for "is X really a Nagini limitation?" decisions.
 
 ### examples/
 Working verified `.py` files. Load individual files as needed.

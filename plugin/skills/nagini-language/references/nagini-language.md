@@ -223,9 +223,41 @@ def network_address(addr: int, prefix: int) -> int:
     Ensures(net_id(Result(), prefix) * block_size(prefix) == Result())
 ```
 
+### Opaque pure functions
+
+`@Opaque` (stacked with `@Pure`) hides the function's body from callers: only the contract (`Requires`/`Ensures`) is visible at call sites. `Reveal(f(args))` — an expression returning the application's value — makes the definition of exactly that one application available where it appears.
+
+```python
+@Pure
+@Opaque
+def plus_four(i: int) -> int:
+    Ensures(Result() > i)
+    return i + 4
+
+def client() -> None:
+    a = plus_four(2)
+    Assert(a > 2)              # from the Ensures — always visible
+    b = Reveal(plus_four(2))
+    Assert(b == 6)             # from the body — needs the Reveal
+```
+
+`Reveal` is per-application and unrolls one step: `Reveal(tri(2))` for a recursive `tri` yields `tri(2) == 2 + tri(1)` with `tri(1)` still opaque; each further level needs its own `Reveal`.
+
 ### Property getters are implicitly pure
 
 A `@property` getter is treated as a pure function automatically. Do not stack `@Pure` on it.
+
+### Heap snapshots
+
+A heap-reading `@Pure` function is encoded for the solver as a mathematical function of its arguments *and a snapshot* — a term bundling the values of every heap location the function may read. Two applications of `f` at different program points are equal only if their snapshots can be proven equal; the solver never identifies "the same call" across states on its own.
+
+The verifier knows a location's value only through a permission it currently holds. Exhaling a permission discards that knowledge; inhaling one binds the location to a fresh unknown — this is exactly what makes framing sound, since whoever held the permission could have written anything. A loop head does the same wholesale: the body is verified for an arbitrary iteration, starting from a state where every location the invariant grants permission to holds a fresh unknown constrained only by what the invariant states.
+
+An application of `f` after such a permission round-trip is therefore a function of fresh unknowns, equal to the pre-state application only if the specification supplies the connection — per-location equalities (`self.x == Old(self.x)`), or the function's value directly (`f(self) == Old(f(self))`). Concretely:
+
+- In an `Ensures` list, a clause that reads through an `Acc` must come textually after the clause granting it: clauses are processed left to right, and the read needs the freshly granted permission and its value binding.
+- A fact about `f(x)` proven before a call or a loop must be restated to hold after it — in the callee's `Ensures`, or in a loop `Invariant`.
+- A termination measure is evaluated once, against the entry snapshot, with no place to restate the connection: a heap-reading measure (`MustTerminate(count(self.data))`) cannot be re-related once a loop has round-tripped the permissions.
 
 ## ContractOnly Functions
 
@@ -294,24 +326,14 @@ Use the element form when the property is naturally per-element and does not dep
 
 ### Multi-variable Quantification
 
-For any property mentioning more than one bound variable (sortedness, monotonicity, pairwise relations, matrix predicates, …), prefer `Forall2` (and `Forall3`, …, `Forall6`) over nesting `Forall` calls. `ForallN` takes `N` domain types followed by a lambda of `N` variables, and accepts one trigger list spanning all of them.
+`Forall2` through `Forall6` bind several variables in one quantifier: `ForallN` takes `N` domain types followed by a lambda of `N` variables, and accepts one trigger list spanning all of them.
 
 ```python
-# Preferred: single trigger mentioning both variables
 Forall2(int, int, lambda i, j: (
     Implies(0 <= i and i <= j and j < len(a), a[i] >= a[j]),
     [[a[i], a[j]]]  # trigger fires when both a[i] and a[j] are in scope
 ))
-
-# Avoid: nested Forall
-Forall(int, lambda i:
-    Forall(int, lambda j:
-        Implies(0 <= i and i < j and j < n, arr[i] <= arr[j])
-    )
-)
 ```
-
-`Forall3` through `Forall6` extend the same pattern to more variables.
 
 ### Quantified Permissions
 
@@ -388,7 +410,7 @@ There is no `.count` and no `x in m` for multisets, check membership with `m.num
 
 ## Built-in Functions with Verified Contracts
 
-Nagini ships verified contracts for many Python built-ins, usable directly in specs and pure functions. This table is the canonical list — never write a custom `@Pure` helper that duplicates an entry:
+Nagini ships verified contracts for many Python built-ins, usable directly in specs and pure functions. The table is the canonical list of the supported forms and the custom helpers they make redundant:
 
 | Use this | Don't write |
 |----------|-------------|
@@ -397,8 +419,6 @@ Nagini ships verified contracts for many Python built-ins, usable directly in sp
 | `len(xs)` | `list_len(xs)`, manual length recursion over a list/PSeq |
 | `x in xs` (`List`, `PSeq`, `PSet`) | custom `contains(xs, x)`, existential over indices |
 | `xs[i]`, `xs.take(n)`, `xs.drop(n)`, `xs + ys` (`PSeq`) | manual sequence rebuild via recursion |
-
-Only write a custom pure function when no built-in covers the operation.
 
 ## Integers
 
@@ -435,7 +455,7 @@ The missing fact is always the same one: **`type(x) == int`**. State it where yo
 
 `int` is unbounded: arithmetic (`+`, `-`, `*`, `//`, `%`) has no size limits and needs no configuration. Two constructs do have limits:
 
-**Bitwise operations** on `int` are encoded through fixed-width bitvectors sized by the verifier's bitops-width setting (default 8; set per request via the `int_bitops_size` parameter of the verify tools — the width sticks for subsequent requests — or at CLI launch via `--int-bitops-size`). `&`, `|`, `^` require both operands in `[-(2**N), 2**N - 1]` on every application; shifts require a non-negative count and require the operand range only when the count exceeds 64. Out-of-range operands fail with a bare precondition error on the bitwise expression (the message does not name the flag). Prefer the arithmetic form when one exists — it is unbounded and needs no flag: `x & (2**k - 1)` is `x % 2**k`, `x >> k` is `x // 2**k`, `x << k` is `x * 2**k` (exact equalities for all ints).
+**Bitwise operations** on `int` are encoded through fixed-width bitvectors sized by the verifier's bitops-width setting (default 8; set per request via the `int_bitops_size` parameter of the verify tools — the width sticks for subsequent requests — or at CLI launch via `--int-bitops-size`). `&`, `|`, `^` require both operands in `[-(2**N), 2**N - 1]` on every application; shifts require a non-negative count and require the operand range only when the count exceeds 64. Out-of-range operands fail with a bare precondition error on the bitwise expression (the message does not name the flag). The arithmetic forms are unbounded and need no flag: `x & (2**k - 1)` is `x % 2**k`, `x >> k` is `x // 2**k`, `x << k` is `x * 2**k` (exact equalities for all ints).
 
 **Power expressions**: `**` with a constant exponent is evaluated by unrolling one step per solver instantiation, so only small exponents evaluate (tens, not hundreds); with a symbolic exponent it is essentially opaque without manual lemmas. Exponents must be non-negative. Write large constants as numeral literals (decimal or hex), in code and contracts alike:
 
@@ -462,23 +482,6 @@ while i < n:
 3. Together with loop exit condition, imply the postcondition
 
 
-### Invariant Structure
-
-Typical loop invariants include:
-1. **Bounds**: `0 <= i and i <= n`
-2. **Permissions**: `Acc(list_pred(items))` or `Acc(obj.field)`
-3. **Progress property**: What's been computed for elements `[0..i)`
-4. **Current state**: Properties of loop variables
-5. **Pure function facts**: Re-state pure function preconditions that the loop body needs (e.g., `Invariant(is_sorted(ToSeq(a)))`)
-
-### `for` Loops
-
-**Prefer indexed `while` loops over `for x in iterable:`.** Two reasons:
-
-- The iterator holds part of the iterable's `list_pred` for the duration of the loop, which makes it hard to say much about the list itself in the loop invariant.
-- There are assorted bugs and rough edges in the iterator translation that cause unexpected framing and permission failures.
-
-The idiomatic replacement is `i = 0; while i < len(xs): ...; i += 1`, with index-form invariants. If you really do need a `for`-loop, Nagini's `tests/functional/verification/test_iterator_list.py` and `tests/obligations/verification/test_for_must_terminate.py` are the authoritative patterns.
 
 ## Termination
 
@@ -508,7 +511,8 @@ def factorial(n: int) -> int:
     return n * factorial(n - 1)
 ```
 
-Decreases clauses can also contain a boolean *condition* (`Decreases(measure, condition)` as second argument. The measure is only checked when the condition holds). For a lexicographic ordering on `(a, b)`, combine both into one measure.
+Decreases clauses can also contain a boolean *condition* (`Decreases(measure, condition)` as second argument. The measure is only checked when the condition holds). The condition is a guard, not a second measure component — there is no lexicographic tuple form.
+
 
 Every `@Pure` function called from a function with a `Decreases` needs to prove termination as well. A non-recursive function (which terminates trivially) needs to be annotated with `Decreases(1)`.
 
@@ -530,7 +534,7 @@ def quicksort(arr: List[int]) -> List[int]:
     quicksort(more)
 ```
 
-Every call in the body must have a measure strictly below the caller's. Builtin calls count — list construction, `append`, etc. have measure 1 — so any method that calls anything needs at least `MustTerminate(2)`; with `MustTerminate(1)` the first such call fails. For non-recursive methods, just pick a comfortably large constant.
+Every call in the body must have a measure strictly below the caller's. Builtin calls count — list construction, `append`, etc. have measure 1 — so any method that calls anything needs at least `MustTerminate(2)`; with `MustTerminate(1)` the first such call fails.
 
 A loop inside a `MustTerminate` method must carry its own termination invariant:
 
@@ -545,10 +549,6 @@ The loop's measure must strictly decrease each iteration, and is independent of 
 ### Non-pure methods without `MustTerminate`
 
 If a non-pure method is recursive but has no `Requires(MustTerminate(...))`, Nagini **does not verify its termination** — it simply accepts it. This is acceptable for lemma-style helper methods where you are confident the recursion terminates but do not need Nagini to check it.
-
-### Choosing the measure
-
-Termination measures need only be **well-founded and strictly decreasing across the recursive call / back-edge** — they do not need to be tight. Tight measures make the proof brittle: a later edit that adds one extra recursive call or inserts a helper lemma forces measure bumps in every caller that passes a bound through. When choosing a measure, leave some slack, and if you need to increase it later, anticipate further increases.
 
 ## Assert and Assume
 
@@ -588,6 +588,4 @@ Modeled list mutators: `append`, `extend`, `insert`, `remove`, `reverse`, `copy`
 
 A module-level name assigned exactly once is a constant: read it freely in any function. A reassigned global needs `Acc(<name>)` in contracts and a `global` declaration to rebind. A global list/dict/set is a constant binding whose *contents* still need the usual container permission — e.g. `Requires(Acc(list_pred(P1), 1/100))` and matching `Ensures`. Module-init facts do not flow into defs: restate what the body needs (`len(P1) == 3`, element values) in the precondition; module-level callers hold the permissions and facts after initialization.
 
-## Equality
-Usually you want to use `is` not `==`. `is` checks for identity (same object), while `==` checks for value equality. For references `is` is almost always what you want. For primitive types like `int` it *should* be interchangeable, but due to some Nagini internals, there can be cases where `==` does not work as expected. So prefer `is`/`is not` for all comparisons.
 

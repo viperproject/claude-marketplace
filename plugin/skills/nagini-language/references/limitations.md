@@ -1,28 +1,18 @@
-# Nagini Capabilities & Common Misconceptions
+# Nagini Limitations
 
-Nagini and Viper are more expressive than you might assume. Before concluding that a property cannot be expressed or that a workaround is needed, check this list. Each entry corrects a commonly fabricated limitation.
+Things that Nagini genuinely cannot do. Nagini and Viper are more expressive than you might assume — before concluding that a property cannot be expressed or that a workaround is needed, check this list.
 
-**If you believe Nagini cannot express something and it is not listed here as a confirmed limitation, assume you are wrong.** Try the direct encoding first. Only treat it as a real limitation once you have a concrete error demonstrating it.
+**If you believe Nagini cannot express something and it is not listed here, assume you are wrong.** Try the direct encoding first. Only treat it as a real limitation once you have a concrete error demonstrating it.
 
 The reverse does not hold for performance limitations. An entry that says "times out" or "expensive" describes behavior at realistic scale; a small snippet that passes quickly does not refute it and is not a license to use the construct. Follow the entry's workaround anyway.
-
-## Confirmed Capabilities
-
-Things that Nagini CAN do, despite common misconceptions:
-
-<!-- Add entries in this format:
-- **Misconception**: "Nagini cannot do X"
-  **Reality**: Nagini can do X. Here's how: `example code or approach`
--->
-
-## Confirmed Limitations
-
-Things that Nagini genuinely cannot do:
 
 <!-- Add entries in this format:
 - **Limitation**: description
   **Workaround**: recommended approach
 -->
+
+- **Limitation**: Mutually recursive `@Pure` functions or predicates whose contracts reference each other. As soon as the postconditions — and in Nagini therefore the result types — rely on each other, one of the pair will always fail.
+  **Workaround**: Never design the cycle in. Fuse the pair into one self-recursive `@Pure` engine (over a combined argument or mode flag) with thin non-recursive wrapper functions, or stratify the definitions so the dependency runs one way only.
 
 - **Limitation**: `Exists()` quantifiers. Never use them. Toy snippets with an `Exists` verify in seconds; the same shape inside a real contract — under quantified permissions, in a recursive predicate, or instantiated per loop iteration — causes timeouts that surface far from the `Exists` itself and are near-impossible to debug. A passing probe does not clear it for use.
   **Workaround**: Every existential has a constructive replacement: an explicit witness variable, a pure function that returns the witness, or a pure boolean function defined by recursion.
@@ -53,6 +43,9 @@ Things that Nagini genuinely cannot do:
 
 - **Limitation**: User-defined `__lt__`/`__le__`/`__gt__`/`__ge__` dunders do not work with the `min()` and `max()` builtins — their contracts expect numeric types. A `@Pure` comparison dunder does drive the comparison operators (`<`, `<=`, `>`, `>=`).
   **Workaround**: For `min()`/`max()`, add explicit comparison-based helpers on the class and rewrite call sites.
+
+- **Limitation**: `==` can fail to prove where `is` succeeds. For primitive types like `int` the two *should* be interchangeable, but Nagini internals sometimes leave `==` facts unprovable.
+  **Workaround**: Prefer `is`/`is not` for all comparisons — for references, identity is almost always the intended meaning anyway.
 
 - **Limitation**: `for x in iterable:` loops are difficult to verify. The iterator holds part of the iterable's `list_pred` for the loop's duration and references the elements in a way that makes it hard to state anything about it in invariants. On top of that, the iterator translation has some bugs and rough edges that cause unexpected framing and permission failures.
   **Workaround**: Use an indexed `while i < len(xs):` loop instead.
