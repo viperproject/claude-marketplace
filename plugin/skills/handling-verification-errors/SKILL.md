@@ -7,22 +7,15 @@ description: Nagini debugging and error handling reference. Provides strategies 
 
 - **Never** make assumptions about the cause of a verification error without evidence.
 - Instead, always use the systematic techniques described here to gather information and isolate the true cause.
-- If you have a theory — "the verifier cannot do X", "this pattern is the problem" — always start by creating a minimal snippet pair that  demonstrates the theory: the failing shape and the closest working variant. Demonstrate before fixing broadly or reporting a limitation.
+- If you have a theory — "the verifier cannot do X", "this pattern is the problem" — always start by creating a minimal snippet pair that demonstrates the theory: the failing shape and the closest working variant. Demonstrate before fixing broadly or reporting a limitation.
 - Then, you can confidently fix the underlying issue.
 - **Never** weaken or delete a contract just to make verification pass; surface the mismatch instead.
 
 # Verifier Limitations
 
-Do not make assumptions about how the verifier works internally. If you make incorrect assumptions, you will make mistakes. The verifier is reasonably powerful. It should practically always be possible to verify code with the correct specifications. If you think you have a correct specification but the verifier cannot prove it, you are likely missing a necessary intermediate assertion or lemma.
+Do not make assumptions about how the verifier works internally. The verifier is reasonably powerful: it should practically always be possible to verify code with the correct specifications. If you think you have a correct specification but the verifier cannot prove it, you are likely missing a necessary intermediate assertion or lemma.
 
-There is a list of known verifier limitations in the `nagini-language` skill's limitations reference. If you think you've encountered a new limitation, confirm it before acting on it:
-
-*Never* assume the verifier has a limitation or bug without first testing it. It is very easy to jump to incorrect conclusions about the reason of a failure. Instead, always try to write a minimal self-contained case that would fail if the limitation exists and verify it. If it verifies, the limitation is not real and the error has another cause.
-If you do encounter a real verifier limitation that prevents verification of correct code, report it prominently in your output with a description and the minimal snippet that demonstrates the issue.
-
-# Verifier options
-
-Verify only the method(s) you are debugging as one list in a single call rather than one call each. Read results from the structured response: `message` and `code` identify the error kind, `reason` the failing assertion, `startLine` the location, `counterexample`, `branchConditions` and `debug` the debugging signals. `translationFailed: true` marks syntax/type/translation errors rather than verification failures.
+There is a list of known verifier limitations in the `nagini-language` skill's limitations reference. A suspected new limitation is a theory like any other: demonstrate it with a minimal snippet pair first. If the failing shape verifies in isolation, the limitation is not real and the error has another cause. If you do encounter a real limitation that prevents verification of correct code, report it prominently in your output with a description and the demonstrating snippet.
 
 # Dealing with Errors
 
@@ -81,7 +74,7 @@ Reading terms: `x@3@05` is a symbolic constant for program variable `x` (numbers
 
 
 #### Interpreting `reasonUnknown`
-For most failures, start by understanding why the SMT-query failed, which is given in the `reasonUnknown` field. :
+For most failures, start by understanding why the SMT-query failed, which is given in the `reasonUnknown` field:
 
 | Value | Meaning | Strategy |
 |---|---|---|
@@ -244,7 +237,6 @@ After locating the facts that hold at the failure site (every probe assert that 
 - **Preconditions:** a selection of passing asserts in the original method at or before the failure site — if you want to use a fact that isn't yet asserted there, go assert it in the original first; if the assert passes, you may include it, if it fails, the fact does not actually hold there and is not a valid precondition. Pick the **minimal** subset of those passing asserts that you believe should suffice.
 - **Body:** `pass`.
 2. **Output.** Hand Phase 3 the candidate file `<method>_repro.py`. Phase 2 does not edit the original source.
-3. **Log.** One log entry with `Phase: reduce`, fields: `Precondition count`.
 
 ## Phase 3: Fix
 
@@ -275,15 +267,13 @@ Verification iteration is bounded; recognise stuck-ness early so the budget is n
 - **Same verification error on the same source line twice in a row.** The next attempt must be a Phase 2 probing step (not another fix). A repeated identical error means the previous fix did not address the actual missing step; probing will reveal where the missing step actually sits.
 - **Same verification error on the same source line three times in a row.** Stop iterating. Report the missing step you have identified, the strategies tried, and your best hypothesis for why it is hard to discharge. Recommend whether the spec needs redesign, whether a proof technique is needed, or whether the limitation is a Nagini bug.
 
-These criteria are checks on the structured log, not on intuition. If two consecutive log entries record the same error code at the same line, the next entry must have `Phase: probe`.
-
 # Resources
 
 ## references/debugging-examples.md
 Four worked debugging examples showing the full diagnosis process in Nagini/Python syntax: permission leak in loop, missing fold before return, self-framing violation, weak loop invariant. Each example includes a **quick-check pattern summary** for rapid diagnosis.
 
 ## references/proof-construction.md
-Generic reference for proving lemma bodies in Nagini: proof-writing discipline (add only what the failure shows is missing; never pre-plan), proof techniques (structural induction, fuel-based induction, case analysis, proof chaining), the fuel-based recursion pattern, and the lemma catalog (content, preservation, equivalence, bound, monotonicity, stability) as a vocabulary for the kind of fact you are proving.
+Generic reference for proving lemma bodies in Nagini: proof-writing discipline (add only what the failure shows is missing; never pre-plan), proof techniques (structural induction, case analysis, proof chaining), and the lemma catalog (content, preservation, equivalence, bound) as a vocabulary for the kind of fact you are proving.
 
 # Appendix: Symptom Diagnostic Table
 

@@ -21,7 +21,7 @@ The reverse does not hold for performance limitations. An entry that says "times
   **Workaround**: Avoid `range()`. In specs, quantify over `int` with an explicit bounds guard: `Forall(int, lambda i: (Implies(lo <= i and i < hi, ...), [[...]]))`. In code, use an indexed `while` loop.
 
 - **Limitation**: Connecting quantified membership facts to the concrete contents of a collection can be difficult or impossible. For example, a set `s` known only through "`x in s` iff `P(x)`" has no terms to trigger the solver, so you cannot derive e.g. the contents `Assert(s == PSet(1))` or its cardinality (`len(s)`) from that alone. 
-  **Workaround**: Keep aggregates constructive: build collections operation by operation, or track the count in its own variable updated alongside every mutation. Keep cardinality out of `Decreases` measures — use fuel-bounded recursion instead.
+  **Workaround**: Keep aggregates constructive: build collections operation by operation, or track the count in its own variable updated alongside every mutation. Keep cardinality out of `Decreases` measures.
 
 - **Limitation**: Bitwise operators on ints (`&`, `|`, `^`, `<<`, `>>`) encode through an int-to-bitvector bridge that is very expensive for the solver, especially under quantifiers or in loop invariants — proofs that touch them often time out.
   **Workaround**: When values are nonnegative and the width permits, use the arithmetic equivalents instead (`x & 1` -> `x % 2`, `x >> k` -> `x // 2**k`, `x << k` -> `x * 2**k`); they verify orders of magnitude faster.

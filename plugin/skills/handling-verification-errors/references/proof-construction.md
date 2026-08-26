@@ -35,7 +35,7 @@ The SMT solver struggles with:
 
 - **Inductive properties**: Properties over recursive structures require explicit induction
 - **Multi-step heap reasoning**: Following pointer chains through predicates needs unfolding guidance
-- **Recursive function properties**: Properties relating recursive calls at different fuel levels
+- **Recursive function properties**: Properties relating calls of a recursive function at different arguments
 - **Cross-predicate reasoning**: Connecting facts about different predicates or abstract states
 
 **Signal that you need a proof**: verification fails even though the property is intuitively true, and no amount of assertion/invariant strengthening fixes it.
@@ -44,11 +44,7 @@ The SMT solver struggles with:
 
 ## Lemma Functions
 
-A **lemma** is a function whose preconditions state assumptions, postconditions state the conclusion, and the body is the proof.
-
-**Default form: regular method.** Because lemmas are normally called from method bodies, most lemmas can simply be methods themselves.
-
-**`@Pure`lemmas:** If the lemma needs to be applied inside a *pure context* — i.e., inside another `@Pure` function's body, inside a predicate, or anywhere only pure expressions are allowed — define it as `@Pure` returning `bool` and write the proof as an expression:
+A **lemma** is a function whose preconditions state assumptions, postconditions state the conclusion, and the body is the proof. The choice between a regular method and a `@Pure` lemma is covered by the skill's lemma promotion procedure. A `@Pure` lemma returns `bool` with the proof written as an expression:
 
 ```python
 @Pure
@@ -149,19 +145,6 @@ while k < size:
 
 ---
 
-## Fuel-Based Recursion Pattern
-
-When defining recursive functions over non-recursive data (arrays, sequences), use an explicit **fuel** parameter to bound recursion depth.
-
-1. **Bounded function** `funcB(data, x, fuel)` — recurses with decreasing fuel, returns default at fuel=0
-2. **Wrapper function** `func(data, x)` — calls `funcB` with `|data|` as sufficient fuel
-3. **Monotonicity lemma** — proves `funcB(x, fuel) == funcB(x, fuel + 1)` when fuel is sufficient
-4. **Stability lemma** — proves `funcB(x, fuel1) == funcB(x, fuel2)` when both sufficient
-
-The monotonicity and stability lemmas are essential. Without them, the verifier can't relate `funcB(x, fuel)` to `funcB(x, fuel + k)`.
-
----
-
 ## Lemma Catalog
 
 ### Content Lemma
@@ -246,35 +229,3 @@ def lemma_height_bounded_by_size(node: Optional[TreeNode]) -> None:
         Fold(tree(node))
 ```
 
-### Monotonicity Lemma (fuel-based)
-
-**Purpose**: Prove a fuel-bounded function returns the same result with more fuel, once it has enough.
-
-```python
-def lemma_root_more_fuel(parent: List[int], x: int, fuel: int) -> None:
-    Requires(well_formed(parent) and valid_index(parent, x))
-    Requires(fuel >= 0 and reaches_root(parent, x, fuel))
-    Requires(MustTerminate(fuel + 1))
-    Ensures(root_b(parent, x, fuel) == root_b(parent, x, fuel + 1))
-
-    if not is_root(parent, x):
-        lemma_root_more_fuel(parent, parent[x], fuel - 1)
-```
-
-### Stability Lemma (fuel-based)
-
-**Purpose**: Prove the result is the same for any two sufficient fuel levels.
-
-```python
-def lemma_depth_stable(parent: List[int], x: int, fuel1: int, fuel2: int) -> None:
-    Requires(well_formed(parent) and valid_index(parent, x))
-    Requires(0 <= fuel1 and fuel1 <= fuel2)
-    Requires(reaches_root(parent, x, fuel1))
-    Requires(MustTerminate(fuel1 + 1))
-    Ensures(depth_b(parent, x, fuel1) == depth_b(parent, x, fuel2))
-
-    if not is_root(parent, x):
-        lemma_depth_stable(parent, parent[x], fuel1 - 1, fuel2 - 1)
-```
-
-**Pitfall**: Recurse on `fuel1`, not `fuel2`. Only `fuel1` is guaranteed to reach 0.
