@@ -4,6 +4,7 @@ from nagini_contracts.contracts import *
 from nagini_contracts.obligations import MustTerminate
 
 
+@Ghost
 @Pure
 def seq_contains_idx(s: PSeq[int], x: int) -> int:
     """Lemma: if x in s, then there exists an index where s[idx] == x.
@@ -20,6 +21,7 @@ def seq_contains_idx(s: PSeq[int], x: int) -> int:
         idx: int = seq_contains_idx(tail, x)
         return idx + 1
 
+@Ghost
 @Pure
 def seq_not_contains(s: PSeq[int], x: int) -> int:
     """Lemma: if no index maps to x, then x not in s."""
@@ -36,6 +38,7 @@ def seq_not_contains(s: PSeq[int], x: int) -> int:
     return 0
 
 
+@Ghost
 @Pure
 def is_sorted(s: PSeq[int]) -> bool:
     """The sequence is strictly sorted (ascending, no duplicates)."""

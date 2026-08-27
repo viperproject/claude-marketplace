@@ -1,6 +1,7 @@
 from nagini_contracts.contracts import *
 from typing import List
 
+@Ghost
 @Pure
 def is_sorted(a: PSeq[int]) -> bool:
     return Forall2(int, int, lambda i, j: (

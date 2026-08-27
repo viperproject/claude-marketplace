@@ -1,65 +1,6 @@
-# Proof Construction
+# Proof Techniques
 
-Patterns and techniques for writing proof annotations in Nagini — loop invariants and lemma bodies — when the SMT solver needs explicit help.
-
-## Writing proofs
-
-When writing a proof body to make a lemma verify, follow these two rules:
-
-**Add only what the failure shows is missing.** Read the verifier's error carefully — it tells you what the solver doesn't know. Common patterns:
-
-- **Missing case distinction**: add an `if`/`else` matching the structure
-- **Missing recursive fact**: add one recursive lemma call (often on a smaller part of the structure)
-- **Missing predicate contents**: add an `Unfold(...) ... Fold(...)` block
-
-Verify after each addition. Stop as soon as verification succeeds.
-
-**Never pre-plan a full proof.** Do not look at the lemma and think "this will need induction with three cases and two helper lemmas" before trying anything. That reasoning leads to proof bloat. Let the verifier fail first, then react to what it actually needs.
-
----
-
-## Loop Invariant Structure
-
-A complete set of loop invariants typically covers:
-1. **Bounds**: `0 <= i and i <= n`
-2. **Permissions**: `Acc(list_pred(items))` or `Acc(obj.field)`
-3. **Progress property**: what has been computed for elements `[0..i)`
-4. **Current state**: properties of loop variables
-5. **Pure function facts**: restate pure-function preconditions the loop body needs (e.g., `Invariant(is_sorted(ToSeq(a)))`)
-
----
-
-## When the Verifier Needs Help
-
-The SMT solver struggles with:
-
-- **Inductive properties**: Properties over recursive structures require explicit induction
-- **Multi-step heap reasoning**: Following pointer chains through predicates needs unfolding guidance
-- **Recursive function properties**: Properties relating calls of a recursive function at different arguments
-- **Cross-predicate reasoning**: Connecting facts about different predicates or abstract states
-
-**Signal that you need a proof**: verification fails even though the property is intuitively true, and no amount of assertion/invariant strengthening fixes it.
-
----
-
-## Lemma Functions
-
-A **lemma** is a function whose preconditions state assumptions, postconditions state the conclusion, and the body is the proof. The choice between a regular method and a `@Pure` lemma is covered by the skill's lemma promotion procedure. A `@Pure` lemma returns `bool` with the proof written as an expression:
-
-```python
-@Pure
-def lemma_property_name(params: Type) -> bool:
-    Requires(assumptions)
-    Ensures(conclusion)
-
-    return True
-```
-
----
-
-## Proof Techniques
-
-### Structural Induction
+## Structural Induction
 
 Unfold to expose structure, recurse on substructure, let the verifier combine the result.
 
@@ -81,7 +22,7 @@ def lemma_structural(x: Optional[Node]) -> None:
 
 **Common uses**: element membership, invariant preservation, function equivalence, size bounds.
 
-#### Nagini example (list length non-negative)
+### Nagini example (list length non-negative)
 
 ```python
 def lemma_length_nonneg(node: Optional[Node]) -> None:
@@ -97,7 +38,7 @@ def lemma_length_nonneg(node: Optional[Node]) -> None:
         Fold(lseg(node))
 ```
 
-### Case Analysis
+## Case Analysis
 
 Split the proof into cases, proving the property separately in each.
 
@@ -114,7 +55,7 @@ def lemma_by_cases(x: int, y: int) -> None:
         lemma_general(x, y)
 ```
 
-### Proof Chaining
+## Proof Chaining
 
 Multiple lemma calls in sequence, each building on the previous:
 
@@ -127,7 +68,7 @@ def lemma_chained(params: Type) -> None:
     lemma_b(params)
 ```
 
-### Loop-Based Universal Proofs
+## Loop-Based Universal Proofs
 
 To prove `forall i :: P(i)`, iterate and call per-element lemmas:
 

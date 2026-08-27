@@ -345,7 +345,96 @@ def streams_injective(streams: Dict[int, Stream]) -> bool:
         [[streams[k1], streams[k2]]]))
 ```
 
-## Built-in Verified Types
+## Ghost Code
+
+Ghost code exists only for verification: Nagini checks that it can never influence regular execution, and can erase it without changing the program's behavior. Everything inside contract calls (`Requires`, `Ensures`, `Invariant`, `Assert`, ...) is ghost automatically; the constructs below make ghost *state and code* explicit outside contracts.
+
+### Ghost types
+
+The P-collections (`PSeq`, `PByteSeq`, `PSet`, `PMultiset`) and the ghost primitives `GInt`, `GFloat`, `GBool`, `GStr`, `GComplex` are ghost types. `MarkGhost` declares a ghost alias of your own:
+
+```python
+GIdx = int
+MarkGhost(GIdx)
+```
+
+A ghost-typed value may appear in contracts and ghost code but not in regular executable code. Assigning one to a non-ghost target is rejected:
+
+```python
+def probe(cs: PSeq[BValue], i: int) -> None:
+    kind: int = cs[i].kind    # REJECTED: "Ghost values may only be assigned
+                              # to ghost targets"
+    kind: GInt = cs[i].kind   # OK: ghost local
+```
+
+The reverse direction is fine — regular values may flow into ghost targets.
+
+### Ghost variables and mixed returns
+
+A local, field, or parameter annotated with a ghost type is ghost. Regular functions declare and update ghost variables freely; those statements are ghost statements. A regular function can also return a regular and a ghost part together as a two-element tuple:
+
+```python
+def counted_sum(l: List[int]) -> Tuple[int, GIdx]:
+    Requires(Acc(list_pred(l), 1/2))
+    Ensures(Acc(list_pred(l), 1/2))
+    Ensures(Result()[1] == len(l))
+    total = 0
+    steps: GIdx = 0            # ghost local in a regular function
+    i = 0
+    while i < len(l):
+        Invariant(Acc(list_pred(l), 1/2) and 0 <= i and i <= len(l))
+        Invariant(steps == i)
+        total += l[i]
+        steps += 1             # ghost statement
+        i += 1
+    return total, steps        # callers unpack: s, n = counted_sum(l)
+```
+
+### `@Ghost` functions and classes
+
+`@Ghost` marks a whole def (or class) as ghost. Ghost functions may be called from specs and as ghost statements in regular code, but never where the result reaches regular execution. Ghost code must provably terminate: a `@Ghost` method needs `Requires(MustTerminate(measure))` (see Termination), a `@Ghost @Pure` function proves termination via `Decreases` as usual.
+
+**A `@Pure` helper over ghost values must be `@Ghost @Pure`.** A plain `@Pure` function taking a `PSeq` and returning `bool` or `int` is rejected (`invalid.ghost.return` — the result is ghost, the annotated return type is not):
+
+```python
+@Ghost
+@Pure
+def is_sorted(a: PSeq[int]) -> bool:
+    return Forall2(int, int, lambda i, j: (
+        Implies(0 <= i and i < j and j < len(a), a[i] <= a[j]),
+        [[a[i], a[j]]]))
+```
+
+The same applies to lemma *methods* over ghost values — a lemma taking a `PSeq` must be `@Ghost` (plus `MustTerminate`); a bare call to it in a regular body is a ghost statement:
+
+```python
+@Ghost
+def seq_sum_step(s: PSeq[int], i: int) -> None:
+    Requires(MustTerminate(1))
+    Requires(0 < i and i <= len(s))
+    Ensures(seq_sum(s.take(i)) == seq_sum(s.take(i - 1)) + s[i - 1])
+    ...
+
+def list_sum(a: List[int]) -> int:
+    ...
+    while i < len(a):
+        ...
+        seq_sum_step(ToSeq(a), i + 1)   # ghost statement in a regular loop
+```
+
+Write every lemma as `@Ghost`, whether or not its arguments are ghost — lemmas are proof material. A recursive lemma over a heap predicate measures by a pure size accessor; the measure must be provably positive, so give the accessor an `Ensures(Result() >= 1)`:
+
+```python
+@Ghost
+def lemma_length_pos(n: Node) -> None:
+    Requires(node_pred(n))
+    Requires(MustTerminate(length(n) + 1))
+    ...
+    if n.next is not None:
+        lemma_length_pos(n.next)   # length(n.next) < length(n)
+```
+
+## Built-in Ghost Types
 
 ### Sequences (PSeq)
 
@@ -427,19 +516,14 @@ def g(x: int) -> None:
     Requires(x == 0 or x == 1)
     Assert(Q(x))          # FAILS for the same reason
 
-# and P(0) and P(1) does not give Forall(int, lambda i: Implies(0 <= i and i <= 1, P(i)))
+Similarly `P(0) and P(1)` does not give `Forall(int, lambda i: Implies(0 <= i and i <= 1, P(i)))`
+
+def h(x: int, y: int) -> None:
+    Requires(x == y)
+    Assert(PSeq(x) == PSeq(y))   # FAILS: collection equality compares the objects
+    Assert(cnt(x) == cnt(y))     # FAILS for any @Pure cnt: an ==-equal int cannot be
+                                 # substituted into a function application
 ```
-
-The missing fact is always the same one: **`type(x) == int`**. State it where you state any other fact about `x`, and carry it along like a permission. With `Requires(type(x) == int)`, `f` and `g` verify.
-
-| Place | Write |
-|---|---|
-| `int` parameter | `Requires(type(x) == int)` |
-| `int` return value | `Ensures(type(Result()) == int)` |
-| `int` field | `type(self.n) == int` next to `Acc(self.n)` in the predicate / postcondition of `__init__` |
-| contents of a `List[int]` / `Set[int]` / `PSeq[int]` | `Forall(xs, lambda e: (type(e) == int, []))` in the same pre/post/invariant as `list_pred(xs)` — the element form; it is preserved across `append` of exact ints and through loops that build the list, whereas the index form `Forall(int, lambda i: Implies(0 <= i and i < len(xs), type(xs[i]) == int))` needs extra frame assertions after each mutation |
-| loop counter / accumulator | `Invariant(type(i) == int)` (preserved by `i += 1`) |
-| `Forall(int, ...)` whose body identifies `i` (membership, `@ContractOnly`) | add `type(i) == int` to the guard: `Implies(type(i) == int and lo <= i and i < hi, ...)`. The guard then has to be discharged at every use: the concrete index must carry its own `type(x) == int` fact (parameter: `Requires`; local: `Assert`), or the instantiation silently fails. Leave the guard out when the body does not need it |
 
 ### Size limits
 
@@ -479,8 +563,8 @@ Nagini has two separate termination mechanisms. **They are not interchangeable.*
 
 | Context | Mechanism | Where it goes |
 |---------|-----------|---------------|
-| `@Pure` recursive function | `Decreases(measure)` | Between `Requires` and `Ensures` |
-| Non-pure recursive method | `Requires(MustTerminate(measure))` | As a `Requires` precondition |
+| `@Pure` function | `Decreases(measure)` | Between `Requires` and `Ensures` |
+| Non-pure method | `Requires(MustTerminate(measure))` | As a `Requires` precondition |
 | Loop (any method) | `Invariant(MustTerminate(measure))` | Inside the loop body |
 
 ### `Decreases` — `@Pure` functions only
@@ -538,7 +622,9 @@ The loop's measure must strictly decrease each iteration, and is independent of 
 
 ### Non-pure methods without `MustTerminate`
 
-If a non-pure method is recursive but has no `Requires(MustTerminate(...))`, Nagini **does not verify its termination** — it simply accepts it. This is acceptable for lemma-style helper methods where you are confident the recursion terminates but do not need Nagini to check it.
+If a non-pure method is recursive but has no `Requires(MustTerminate(...))`, Nagini **does not verify its termination** — it simply accepts it. 
+
+Ghost code however must always terminate. A `@Ghost` method without `Requires(MustTerminate(...))` fails verification..
 
 ## Assert and Assume
 

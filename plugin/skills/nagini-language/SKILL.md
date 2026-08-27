@@ -34,7 +34,7 @@ Pass/fail is the `success` field. `translationFailed: true` marks syntax/type/tr
 
 `mcp__nagini__cancel(job_token)` cancels an in-flight verification; `mcp__nagini__flush_cache()` clears the verification result cache.
 
-The result cache keys entries on the file content and backend, verifier flags are NOT part of the key. So setting flags and re-running (e.g. other values of `--assertTimeout`, `--timeout`) will lead to cache hits on the old values of the flags; served failures carry a `[note: result served from the verification cache …]` marker. Call `flush_cache()` (or pass `--disableCaching`) whenever re-verifying with raised budgets.
+The result cache keys entries on the file content and backend; verifier flags are NOT part of the key. Editing a file therefore changes its cache key — after an edit, re-verifying needs no flush. Flush only when re-running *unchanged* content under different `viper_args` (e.g. a raised `--assertTimeout`), where the old flags' result would be served back; such hits carry a `[note: result served from the verification cache …]` marker, and `--disableCaching` on the probe is a flush-free alternative. `flush_cache()` clears the whole cache for every agent sharing the server, so a spurious flush makes everyone re-pay verification that a warm cache would have served.
 
 Only *methods* are cached: pure functions and predicates re-pay their full verification cost on every call.
 
@@ -43,7 +43,7 @@ Re-verifying an unchanged member is waste either way — a cached method replays
 ## Resources
 
 ### references/nagini-language.md
-Core language reference: imports, contracts, permissions, predicates, pure functions, quantification, sequences, sets, multisets, built-in functions, loops, termination, container predicates, type annotations, assert/assume, let bindings, equality. **Read this first when writing Nagini code.**
+Core language reference: imports, contracts, permissions, predicates, pure functions, quantification, ghost code (ghost types, `@Ghost`, `GInt`, `MarkGhost`), sequences, sets, multisets, built-in functions, loops, termination, container predicates, type annotations, assert/assume, let bindings, equality. **Read this first when writing Nagini code.**
 
 ### references/nagini-advanced.md
 Advanced features beyond the core: exception contracts (`Exsures`, `RaisedException`), global/module-level variables, threads (`Thread`, `MayStart`, `Joinable`, `ThreadPost`, the `Joinable` conjunct bug). Load this only when working with code that raises exceptions, mutates module-level state, or spawns threads.
@@ -56,10 +56,10 @@ Working verified `.py` files. Load individual files as needed.
 
 | File | Description | Key techniques |
 |------|-------------|----------------|
-| `binary_search.py` | Binary search on a sorted list | `@Pure` boolean predicate, `PSeq`/`ToSeq()`, quantified specs (`Forall`), `Acc(list_pred(a))`, pure function in loop invariant |
+| `binary_search.py` | Binary search on a sorted list | `@Ghost @Pure` boolean predicate, `PSeq`/`ToSeq()`, quantified specs (`Forall`), `Acc(list_pred(a))`, pure function in loop invariant |
 | `linked_list.py` | Linked list with prepend and find | `@Predicate`, `Fold`/`Unfold`, `Unfolding` in pure functions, `Decreases(pred)`, `Optional[Node]`, `is` for reference identity in `Ensures` |
 | `quicksort.py` | Quicksort with partitioning | `for` loops with `Previous(item)`, fractional permissions (`Acc(..., 2/3)`), `MustTerminate`, recursive method, list concatenation |
-| `sorted_list_insert.py` | Sorted list insert maintaining sortedness and uniqueness | `list.insert`, `PSeq.drop`, inductive lemma as `@Pure` function, proof by contradiction, `ToSeq` bridge pattern |
+| `sorted_list_insert.py` | Sorted list insert maintaining sortedness and uniqueness | `list.insert`, `PSeq.drop`, inductive lemma as `@Ghost @Pure` function, proof by contradiction, `ToSeq` bridge pattern |
 
 
 ### references/viper-language.md

@@ -59,7 +59,7 @@ Fold might fail. There might be insufficient permission to access Acc(node.value
 
 ### Diagnosis
 
-**Read the error**: The verifier cannot fold `lseg(head)` because it can't find `Acc(head.value)`. Folding `lseg(head)` requires its body: `Acc(head.value)`, `Acc(head.next)`, and `lseg(head.next)`.
+**Read the diagnostic**: The verifier cannot fold `lseg(head)` because it can't find `Acc(head.value)`. Folding `lseg(head)` requires its body: `Acc(head.value)`, `Acc(head.next)`, and `lseg(head.next)`. For this failure class the `debug` payload answers directly: `state.heap` lists what the path holds at the failure, and a chunk present in `state.oldHeaps['old']` but absent from `state.heap` means it was consumed along the path.
 
 **Reason about the gap**: Before the loop, we unfold `lseg(head)`, giving us `Acc(head.value)`, `Acc(head.next)`, and `lseg(head.next)`. The loop then advances `p` away from `head`. Each iteration unfolds the next node and moves `p` forward — but what happens to the previous node's permissions? The loop invariant only mentions `p`, nothing about `head` or any previously-visited nodes.
 
@@ -112,16 +112,21 @@ Summing list elements but loop invariant doesn't track partial progress:
 
 ```python
 from nagini_contracts.contracts import *
+from nagini_contracts.obligations import MustTerminate
 from typing import List
 
+@Ghost
 @Pure
 def seq_sum(s: PSeq[int]) -> int:
+    Decreases(len(s))
     if len(s) == 0:
         return 0
     else:
         return seq_sum(s.take(len(s) - 1)) + s[len(s) - 1]
 
+@Ghost
 def seq_sum_step(s: PSeq[int], i: int) -> None:
+    Requires(MustTerminate(1))
     Requires(0 < i and i <= len(s))
     Ensures(seq_sum(s.take(i)) == seq_sum(s.take(i - 1)) + s[i - 1])
 
@@ -155,7 +160,7 @@ Postcondition of list_sum might not hold. Assertion Result() == seq_sum(ToSeq(a)
 
 ### Diagnosis
 
-**Read the error**: The verifier can't prove `total == seq_sum(ToSeq(a))` at the return point, after the loop.
+**Read the diagnostic**: The verifier can't prove `total == seq_sum(ToSeq(a))` at the return point, after the loop. In the `debug` payload this shows as `state.store` binding `total` to a fresh symbol version after the loop — the havoc signature of a variable modified in the loop but unconstrained by its invariant.
 
 **Reason about the gap**: This requires understanding how the verifier reasons about loops. After a loop completes, the verifier *only* knows:
 - What the loop invariant states
@@ -231,6 +236,7 @@ The solution is two lemmas that bridge the gap between indices and values.
 **Lemma 1 — Reverse containment** (`x in s` → index witness): Proved by structural induction on the sequence. If `x` equals the first element, return index 0. Otherwise, recurse on the tail (`s.drop(1)`) and add 1 to the result.
 
 ```python
+@Ghost
 @Pure
 def seq_contains_idx(s: PSeq[int], x: int) -> int:
     """If x in s, returns an index where s[idx] == x."""
@@ -250,6 +256,7 @@ def seq_contains_idx(s: PSeq[int], x: int) -> int:
 **Lemma 2 — Not-contains** (all indices ≠ `x` → `x` not in `s`): Proved by contradiction using Lemma 1. Assume `x in s`, then `seq_contains_idx` returns an index `i` where `s[i] == x`, contradicting the precondition that `s[i] != x` for all `i`.
 
 ```python
+@Ghost
 @Pure
 def seq_not_contains(s: PSeq[int], x: int) -> int:
     """If no index maps to x, then x not in s."""

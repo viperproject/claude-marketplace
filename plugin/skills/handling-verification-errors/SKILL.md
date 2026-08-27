@@ -49,7 +49,7 @@ Once Phase 1 has reduced the failure to a single failing assertion, diagnose **w
 Of course, it is also always possible that the state (in particular `assumptions` and `state`) genuinely does not entail the fact you are asserting. No amount of solver help can fix that; it usually requires changes to contracts or loop invariants. 
 
 ### Understand the error
-Never guess what the reason for a failure is. The error message should contain all the info you need, in particular the error location, reason and the `debug` payload. Read the evidence first.
+Never guess what the reason for a failure is. The failing diagnostic carries the evidence: the location, the reason, and the `debug` payload. Read the evidence first.
 
 If the issue is a timeout, consult the `nagini-performance` skill.
 
@@ -67,7 +67,7 @@ Each failing diagnostic's `debug` object contains the symbolic state at the fail
 | `branchConditions` | The branch decisions leading to the failing path | Identify which control-flow path fails |
 | `state.store` / `state.heap` / `state.oldHeaps` | Local variables, and the heap as a list of chunks (`resource(receiver; snapshot, permission)`) | Trace which symbolic value a variable holds; spot havocked (freshly re-assigned) values after calls; see which permissions the path actually holds |
 
-Bulk fields — the full SMT session (`proverEmits`), the background axioms (`preambleAssumptions`), and the symbol declarations (`functionDecls`/`macroDecls`) — are collected and archived server-side, not sent inline. When a result carries many large diagnostics, later ones may arrive with fields truncated or dropped, each noted in the payload's `omitted` map.
+Bulk fields — the full SMT session (`proverEmits`), the background axioms (`preambleAssumptions`), and the symbol declarations (`functionDecls`/`macroDecls`) — are collected and archived server-side. Oversized results also are truncated in `debug` and noted in the payload's `omitted` map. The result's top-level `recordedAt` names this run's archive directory, and `Read`ing its `result.json` gives the untruncated payloads. Whenever an `omitted` marker hides a field the diagnosis needs, read the archive instead of reasoning around the gap.
 
 Reading terms: `x@3@05` is a symbolic constant for program variable `x` (numbers are internal versions — successive assignments create new versions). Integers are boxed: `__prim__int___box__`/`int___unbox__` wrap between Python ints and SMT ints, and `_checkDefined(_, x, id)` wraps variable reads (it is identity on the value). `QA x :: body` is a universal quantifier. Pure functions appear applied to a snapshot argument first (`ipow(_, b, e)`).
 
@@ -78,9 +78,26 @@ For most failures, start by understanding why the SMT-query failed, which is giv
 
 | Value | Meaning | Strategy |
 |---|---|---|
-| `(incomplete quantifiers)` | E-matching gave up: the instantiation chain to the proof was never triggered (under-instantiation). More solver time will not help. | Restate the missing fact as a GROUND fact placed where it is always visible: as a postcondition or a local `Assert`. Add only facts the payload shows are missing: speculative extra ground facts feed the instantiation engine and can slow everything down. For quantified goals, also check TRIGGER VOCABULARY: do the premise quantifiers' trigger terms occur under the goal's binder? If not, add a bridging quantified `Assert` whose trigger matches the goal's vocabulary and whose body mentions the premise triggers. |
+| `(incomplete quantifiers)` | E-matching gave up: the instantiation chain to the proof was never triggered (under-instantiation). More solver time will not help. | If the failing goal is numerically obvious over ints, check the int-identity trap. Otherwise restate the missing fact as a GROUND fact placed where it is always visible: as a postcondition or a local `Assert`. Add only facts the payload shows are missing: speculative extra ground facts feed the instantiation engine and can slow everything down. For quantified goals, also check TRIGGER VOCABULARY: do the premise quantifiers' trigger terms occur under the goal's binder? If not, add a bridging quantified `Assert` whose trigger matches the goal's vocabulary and whose body mentions the premise triggers. |
 | `canceled` | The budget ran out while the solver was still working. | One diagnostic probe is worth it: re-run once with ~10x `assertTimeout` and read `rlimitDelta`. If it stops well below the new budget (reason flips to an incompleteness class), time was never the issue. If it scales with the budget, the proof is genuinely slow — apply the `nagini-performance` skill's budget policy and strategies. |
 | `(incomplete (theory arithmetic))` | Nonlinear integer arithmetic (products, `//`, `%` of variables) is beyond the solver. | More time will not help. Restate the proof with stepping stones that avoid division/modulo OF PRODUCTS entirely: use the Euclid identity (`a == (a // d) * d + a % d`), pure polynomial identities (products may appear; the solver normalizes them), and the bounded-multiple inference (`0 <= m * d < d` implies `m == 0`). `(k * d) // d == k` and `(k * d) % d == 0` are NOT directly provable — derive them via the chain above. |
+
+#### The int-identity trap
+
+A special case of `(incomplete quantifiers)` worth checking before anything else: the failing fact is *numerically obvious* over ints — `PSeq(y) == PSeq(x)` from `y == x`, a `f(y)` fact not transferring to `f(x)` for `@Pure` `f`, `x in s` from `1 in s and x == 1`, a goal embedding `(1 if v == x else 0)`. The cause is that `x` is not known to be exactly `int` (the static type admits subclasses such as `bool`), so `==` gives value equality but not the object identity these positions need — semantics and failing shapes in the `nagini-language` reference, Integers → Typing.
+
+The fix: ensure the type of the variables involved is exactly `int`, excluding subtypes, via **`type(x) == int`**. State it where you state any other fact about `x`, and carry it along like a permission.
+
+| Place | Write |
+|---|---|
+| `int` parameter | `Requires(type(x) == int)` |
+| `int` return value | `Ensures(type(Result()) == int)` |
+| `int` field | `type(self.n) == int` next to `Acc(self.n)` in the predicate / postcondition of `__init__` |
+| contents of a `List[int]` / `Set[int]` / `PSeq[int]` | `Forall(xs, lambda e: (type(e) == int, []))` in the same pre/post/invariant as `list_pred(xs)` — the element form; it is preserved across `append` of exact ints and through loops that build the list, whereas the index form `Forall(int, lambda i: Implies(0 <= i and i < len(xs), type(xs[i]) == int))` needs extra frame assertions after each mutation |
+| loop counter / accumulator | `Invariant(type(i) == int)` (preserved by `i += 1`) |
+| `Forall(int, ...)` whose body identifies `i` (membership, `@ContractOnly`) | add `type(i) == int` to the guard: `Implies(type(i) == int and lo <= i and i < hi, ...)`. The guard then has to be discharged at every use: the concrete index must carry its own `type(x) == int` fact (parameter: `Requires`; local: `Assert`), or the instantiation silently fails. Leave the guard out when the body does not need it |
+
+If no `type(x) == int` fact can be carried to a use site (e.g. an element read from a `List[int]` verified without an element-type invariant), use the fact that every arithmetic result is exactly `int`: `f(x + 0)` supports the identity reasoning that `f(x)` lacks. A local rescue only, for when proper typing is not possible.
 
 #### Interpreting `state.heap`
 A `insufficient.permission`, `fold.failed`/`unfold.failed`, or `leak_check.failed` diagnostic means that a required permission chunk or obligation could not be exhaled. Start from the heap listing `state.heap`, which is a short list of what the path holds at the failure: `resource(receiver; snapshot) # amount`. Compare it against what the failing construct demands (`failedAssertion` names the demanded chunk). The read classifies the failure into one of two shapes:
@@ -242,7 +259,15 @@ After locating the facts that hold at the failure site (every probe assert that 
 
 ### Verify the candidate
 
-Make the candidate verify. Apply the same probing technique as Phase 2's locate stage: add asserts and run the verifier. When the body needs real proof machinery, consult `references/proof-construction.md` for proof techniques.
+Make the candidate verify. Apply the same probing technique as Phase 2's locate stage: add asserts and run the verifier. When the body needs real proof machinery, consult `references/proof-techniques.md` for the technique templates.
+
+When writing a proof body, follow two rules:
+
+**Add only what the diagnosis shows is missing.** Phase 2 ends with a located missing step; each addition responds to it, and each new failure gets the same Phase-2 reading.
+
+**Never pre-plan a full proof.** Do not look at the goal and think "this will need induction with three cases and two helper lemmas" before trying anything. That reasoning leads to proof bloat. Let the verifier fail first, then react to what it actually needs.
+
+Real proof machinery is needed where the SMT solver structurally struggles — inductive properties over recursive structures, multi-step heap reasoning through predicate chains, properties relating a recursive function's calls at different arguments, and cross-predicate reasoning connecting facts about different abstract states. The signal: verification fails even though the property is intuitively true, and no amount of assertion/invariant strengthening fixes it.
 
 There are three possible outcomes:
 
@@ -250,14 +275,39 @@ There are three possible outcomes:
 - **Just asserts.** A flat sequence of `Assert(...)` statements (or non-recursive lemma calls) makes the body verify. Try inlining them at the failure site in the original method. If that verifies, no lemma is needed — delete the candidate file. If not, promote to a lemma and call it.
 - **Real proof machinery.** The body needs induction, fuel decrement, `Unfolding`, case analysis, or recursive lemma calls. Promote to a lemma and call it from the original method.
 
+### Loop invariant structure
+
+A complete set of loop invariants typically covers:
+1. **Bounds**: `0 <= i and i <= n`
+2. **Permissions**: `Acc(list_pred(items))` or `Acc(obj.field)`
+3. **Progress property**: what has been computed for elements `[0..i)`
+4. **Current state**: properties of loop variables
+5. **Pure function facts**: restate pure-function preconditions the loop body needs (e.g., `Invariant(is_sorted(ToSeq(a)))`)
+
+### Lemma functions
+
+A **lemma** is a function whose preconditions state assumptions, postconditions state the conclusion, and the body is the proof. Lemmas are always `@Ghost` and always carry a termination measure; the technique templates in `references/proof-techniques.md` show only the proof structure and omit that boilerplate. A pure lemma returns `bool` with the proof written as an expression:
+
+```python
+@Ghost
+@Pure
+def lemma_property_name(params: Type) -> bool:
+    Requires(assumptions)
+    Ensures(conclusion)
+
+    return True
+```
+
 ### Lemma promotion procedure
 
 Promotion is mostly mechanical: the candidate is already a verified, lemma-shaped function. This step just gives it a permanent home.
 
 **File conventions.** Lemmas live in a separate file `lemma_<lemma_name>.py` (same directory as the source) and are imported into the original file. If the lemma needs predicates or pure functions defined in the source file, extract those shared definitions into a `<source_file_name>_definitions.py` file first (to avoid circular imports) and have both files import from it. Check whether a `_definitions.py` file already exists before creating a new one.
+**Contract interface.** Designing the lemma contract correctly is crucial to actually achieving the desired verification goal and performance benefits. Phrase the contract so that instantiation lands on the caller's exact goal terms. Often it is better to take those expressions as parameters instead of baking their values in as constants: a conclusion over a constant leaves the caller to rewrite its term into that shape in its own, expensive context. The same principle cuts the other way: every heavy term the contract mentions must be proven or is re-imported at each call site.
 
 **Procedure.**
-1. Rename the Phase 2 candidate `<method>_repro.py` to `lemma_<lemma_name>.py`. By default the lemma is a regular method; use `@Pure` only when the lemma must be invoked from a pure context (inside another `@Pure` function, a predicate body, or any other place that admits only pure expressions).
+1. Rename the Phase 2 candidate `<method>_repro.py` to `lemma_<lemma_name>.py`. 
+By default the lemma is a `@Ghost` method. Use `@Ghost @Pure` with `Decreases` only if the lemma must be invoked from a pure context (inside another `@Pure` function, a predicate body, or any other place that admits only pure expressions).
 2. Import the lemma into the source file and invoke it where the missing step is. Continue verifying the original method.
 
 # Stuck criteria
@@ -270,10 +320,10 @@ Verification iteration is bounded; recognise stuck-ness early so the budget is n
 # Resources
 
 ## references/debugging-examples.md
-Four worked debugging examples showing the full diagnosis process in Nagini/Python syntax: permission leak in loop, missing fold before return, self-framing violation, weak loop invariant. Each example includes a **quick-check pattern summary** for rapid diagnosis.
+Three worked debugging examples showing the full diagnose-probe-fix arc in Nagini/Python syntax: permission leak in loop, weak loop invariant, and bridging index-based to value-based sequence reasoning with an inductive lemma pair.
 
-## references/proof-construction.md
-Generic reference for proving lemma bodies in Nagini: proof-writing discipline (add only what the failure shows is missing; never pre-plan), proof techniques (structural induction, case analysis, proof chaining), and the lemma catalog (content, preservation, equivalence, bound) as a vocabulary for the kind of fact you are proving.
+## references/proof-techniques.md
+Proof-technique templates for lemma bodies — structural induction, case analysis, proof chaining, loop-based universal proofs — and the lemma catalog (content, preservation, equivalence, bound) as a vocabulary for the kind of fact you are proving.
 
 # Appendix: Symptom Diagnostic Table
 
@@ -294,4 +344,5 @@ Quick-reference for mapping a verification error or symptom to its likely cause 
 | Fact about a field/container provable before a call, unprovable after it (`state.store` shows the value re-assigned across the call) | Callee's `Ensures` re-grants permission to the location without stating value/content preservation — the call havocs it | Add the frame condition to the callee's `Ensures` (e.g. `ToSeq(x.xs) == Old(ToSeq(x.xs))`) | Report as a contract weakness — a missing frame condition cannot be recovered caller-side |
 | Error disappears when unrelated code is added | Self-framing — the extra code incidentally provides a needed permission | Make the permission explicit in the contract | Same |
 | "Function might not terminate" | Missing or incorrect termination measure | Add or fix `Decreases()` on the function/method | Same |
-| A fact about an `int` that is numerically obvious fails | `x` is not known to be exactly `int` (static type `int` admits subclasses such as `bool`) | Same as annotations | Thread `type(x) == int` through the contracts |
+| The failure holds on one `branchConditions` path only | The proof step differs per case; a straight-line body proves neither | Add an `if`/`else` matching the case split (proof-techniques: Case Analysis) | Same |
+| The goal relates a recursive function's values at different arguments (`f(xs)` vs `f(xs.drop(1))`) | The solver does not discover induction; the connecting fact needs an explicit inductive step | Add one recursive lemma call on the smaller structure (proof-techniques: Structural Induction) | Same |

@@ -44,8 +44,5 @@ The reverse does not hold for performance limitations. An entry that says "times
 - **Limitation**: User-defined `__lt__`/`__le__`/`__gt__`/`__ge__` dunders do not work with the `min()` and `max()` builtins — their contracts expect numeric types. A `@Pure` comparison dunder does drive the comparison operators (`<`, `<=`, `>`, `>=`).
   **Workaround**: For `min()`/`max()`, add explicit comparison-based helpers on the class and rewrite call sites.
 
-- **Limitation**: `==` can fail to prove where `is` succeeds. For primitive types like `int` the two *should* be interchangeable, but Nagini internals sometimes leave `==` facts unprovable.
-  **Workaround**: Prefer `is`/`is not` for all comparisons — for references, identity is almost always the intended meaning anyway.
-
 - **Limitation**: `for x in iterable:` loops are difficult to verify. The iterator holds part of the iterable's `list_pred` for the loop's duration and references the elements in a way that makes it hard to state anything about it in invariants. On top of that, the iterator translation has some bugs and rough edges that cause unexpected framing and permission failures.
   **Workaround**: Use an indexed `while i < len(xs):` loop instead.
