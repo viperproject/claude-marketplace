@@ -279,3 +279,49 @@ With these lemmas, the call site becomes straightforward — the loop's index-ba
 # After the loop: invariants give us Forall(i, old_seq[i] != x)
 seq_not_contains(old_seq, x)  # Now verifies
 ```
+
+---
+
+## Example: Reading a Fact-Failure Payload
+
+A loop that swaps `heap[pos]` and `heap[parent]` fails its invariant with
+`invariant.not.preserved:assertion.false`, reason `Assertion ToMS(ToSeq(heap)) == Old(ToMS(ToSeq(heap))) might not hold`, and this payload (abridged):
+
+```json
+{
+  "failedAssertionPretty": "PMultiset___eq__((_, (_, _)),
+      __toMS(PSeq___sil_seq__(_, heap)), Old(__toMS(...)))",
+  "reasonUnknown": "(incomplete quantifiers)",
+  "rlimitDelta": 4500000,
+  "branchConditions": [],
+  "assumptions": ["issubtype(typeof(heap), list(int))",
+                   "PSeq___update__(_, sq, pos, tmp) == ..."],
+  "state": {"store": "TreeSeqMap(heap -> heap@13@07, pos -> pos@4@07, ...)",
+             "heap": ["list_acc(heap@13@07; sm@8@01, 1/1)"]}
+}
+```
+
+Read it in this order:
+1. `reasonUnknown` is `(incomplete quantifiers)` and `rlimitDelta` sits exactly at the budget (500ms × 9000) — the instantiation search was still churning when the cap hit. The skill's `(incomplete quantifiers)` strategy applies: do **not** re-run with a bigger budget.
+2. The goal (pretty form) is a multiset equality over `__toMS(...)` of the sequence; the `assumptions` list has facts about `PSeq___update__` (the element writes) but **nothing connecting a sequence update to its `__toMS` image** — the bridge the goal needs is absent, not slow.
+3. `state.store` shows `heap` still bound to the same version (`heap@13@07`) on both sides — so the failure is not a havocked variable; it really is the missing seq-to-multiset bridging fact.
+
+Fix accordingly: state the bridge as a ground stepping stone before the invariant re-check — `Assert(ToMS(ToSeq(heap)) == old_ms - PMultiset(a, b) + PMultiset(b, a))`-style — or extract a `lemma_seq_update_multiset` with that postcondition and call it after the two writes.
+
+## Example: Reading a Permission-Failure Payload
+
+A pure helper fails with `application.precondition:insufficient.permission` ("There might be insufficient permission") and this payload (abridged):
+
+```json
+{
+  "failedAssertion": "... dict_acc(self._fwd, ...) ...",
+  "reasonUnknown": "(incomplete quantifiers)",
+  "state": {"store": "TreeSeqMap(self -> self_2@10@06, key -> key@4@06, ...)",
+             "heap": ["Box_pair_state(sm@14@06; self_2@10@06) # W"]}
+}
+```
+
+Read it in this order:
+1. `state.heap` — one chunk: the folded predicate `pair_state(self_2)` at full permission, and nothing else. The `dict_acc(self._fwd)` the application demands is not in the heap, so it must live **inside the folded predicate**: the cause is identified before any probe. The call must be wrapped in `Unfolding(self.pair_state(), ...)`, or the function's own precondition must require the predicate and the body unfold it.
+2. Cross-check receivers: the held chunk's receiver (`self_2@10@06`) matches the store's binding for `self` — so this is a folding problem, not an aliasing problem. If they differed, the fix would instead be establishing the aliasing fact or evaluating against the right object.
+3. `reasonUnknown` still gets a look, as a sanity check rather than the router. Here it says `(incomplete quantifiers)`, which adds nothing beyond the heap read (the exhale search gave up — expected when the chunk is plainly absent).

@@ -5,27 +5,26 @@ description: Nagini debugging and error handling reference. Provides strategies 
 
 # Guiding Principle
 
-- **Never** make assumptions about the cause of a verification error without evidence.
-- Instead, always use the systematic techniques described here to gather information and isolate the true cause.
-- If you have a theory — "the verifier cannot do X", "this pattern is the problem" — always start by creating a minimal snippet pair that demonstrates the theory: the failing shape and the closest working variant. Demonstrate before fixing broadly or reporting a limitation.
-- Then, you can confidently fix the underlying issue.
+- **Never** make assumptions about the cause of a verification error without evidence. Instead, always use the systematic techniques described here to gather information and isolate the true cause to fix the underlying issue.
+- When fixing, add only what the evidence shows is missing: each addition responds to a located missing step, and each new failure gets the same diagnostic read.
+- **Never** pre-plan a full proof ("this will need induction, three cases, two helper lemmas") — that leads to proof bloat. Let the verifier fail first, then react to what it actually needs.
 - **Never** weaken or delete a contract just to make verification pass; surface the mismatch instead.
 
-# Verifier Limitations
+The verifier is reasonably powerful: it should practically always be possible to verify code with the correct specifications, so a correct-looking specification that fails usually means a missing intermediate assertion or lemma, not a limitation. The known limitations are listed in the `nagini-language` skill's limitations reference.
 
-Do not make assumptions about how the verifier works internally. The verifier is reasonably powerful: it should practically always be possible to verify code with the correct specifications. If you think you have a correct specification but the verifier cannot prove it, you are likely missing a necessary intermediate assertion or lemma.
+# Debugging strategies
 
-There is a list of known verifier limitations in the `nagini-language` skill's limitations reference. A suspected new limitation is a theory like any other: demonstrate it with a minimal snippet pair first. If the failing shape verifies in isolation, the limitation is not real and the error has another cause. If you do encounter a real limitation that prevents verification of correct code, report it prominently in your output with a description and the demonstrating snippet.
+Understand the failure before fixing it: every fix responds to evidence gathered by the strategies below.
 
-# Dealing with Errors
+- **Probe asserts** — reduce the error to a single failing assertion and measure which facts the solver can derive around it.
+- **Interrogate the verifier** — extract what the verifier saw and did at the narrowed failure: the symbolic state, the solver's reason for giving up, the encoding.
+- **Minimal reproduction** — capture the missing step in a self-contained candidate file and attack it in isolation.
 
-1. **Phase 1: Isolate** — transform the error into a single failing assertion.
-2. **Phase 2: Diagnose** — locate the missing step and reduce it to a self-contained candidate file.
-3. **Phase 3: Fix** — verify the candidate file and apply the fix to the original code.
+The recommended order is the order given: narrow the failure first, then interrogate it, then isolate it. Any step along the way may already explain or resolve the problem, so re-verify as you go and stop when it does. The strategies also compose: apply several at once when useful, and return to any of them as new evidence arrives. It is also always possible that the state genuinely does not entail the fact you are asserting. No amount of solver help can fix that; it usually requires changes to contracts or loop invariants.
 
-## Phase 1: Isolate the error
+## Probe asserts
 
-Transform the error into a failing assertion.
+First reduce the error to a single failing assertion:
 
 **For method calls**: Assert the preconditions of the callee before the call to find out which one fails.
 
@@ -40,142 +39,15 @@ Transform the error into a failing assertion.
 - Assertions with multiple conjuncts: split into separate asserts
 - Method calls with multiple preconditions: assert each precondition separately before the call
 
-## Phase 2: Diagnose
-Once Phase 1 has reduced the failure to a single failing assertion, diagnose **what** the solver cannot derive. Diagnosis has two stages:
+Then diagnose **what** the solver cannot derive: to further understand the failure and also help it with explicit intermediate facts, insert additional assertions before the failing one and re-run the verifier. Insert several `Assert(...)` probes at once. Every passing probe confirms a fact the solver knows; the first failing one pinpoints the missing step. 
 
-1. **Locate the missing step** — evidence-guided probing: the `debug` payload classifies the failure and tells you where to aim; `Assert` probes measure what the solver can actually derive and add the missing facts.
-2. **Reduce to a candidate** — escalation for the hard cases only: when the missing fact resists inline asserts, build a minimal, self-contained Python file that captures it, and try to verify it in isolation.
-
-Of course, it is also always possible that the state (in particular `assumptions` and `state`) genuinely does not entail the fact you are asserting. No amount of solver help can fix that; it usually requires changes to contracts or loop invariants. 
-
-### Understand the error
-Never guess what the reason for a failure is. The failing diagnostic carries the evidence: the location, the reason, and the `debug` payload. Read the evidence first.
-
-If the issue is a timeout, consult the `nagini-performance` skill.
-
-If a failing diagnostic has no `debug` field, the server was launched without SMT-state collection; pass `viper_args: ["--smtStateOnError", "--assertTimeout=500", "--reportReasonUnknown"]` yourself.
-
-Each failing diagnostic's `debug` object contains the symbolic state at the failure, expressed in the verifier's internal term language:
-
-| Field | Content | Use it to |
-|---|---|---|
-| `failedAssertion` | The exact goal term the solver could not prove | See the obligation as the solver sees it (after encoding), not as you wrote it |
-| `failedAssertionPretty` | The same goal with `@line@col` suffixes stripped and `_checkDefined` shims unwrapped | Read the goal quickly; fall back to the raw term when versions matter |
-| `reasonUnknown` | Why the solver returned unknown (see table below) | **Choose the fix strategy** |
-| `rlimitDelta` | Prover resources the failing check consumed, in Z3 rlimit units (the budget is `assertTimeout` ms × 9000) | A delta at the budget means the cap bound the check; a delta well below it means the solver stopped on its own |
-| `assumptions` | Path-condition terms in scope at the failure, pre-filtered to those sharing a symbol with `failedAssertion` (an `omitted` marker counts the rest) | Scan for gross absences and anomalies. To test whether a specific fact is available, probe it with `Assert` — presence in this list is neither necessary nor sufficient for derivability |
-| `branchConditions` | The branch decisions leading to the failing path | Identify which control-flow path fails |
-| `state.store` / `state.heap` / `state.oldHeaps` | Local variables, and the heap as a list of chunks (`resource(receiver; snapshot, permission)`) | Trace which symbolic value a variable holds; spot havocked (freshly re-assigned) values after calls; see which permissions the path actually holds |
-
-Bulk fields — the full SMT session (`proverEmits`), the background axioms (`preambleAssumptions`), and the symbol declarations (`functionDecls`/`macroDecls`) — are collected and archived server-side. Oversized results also are truncated in `debug` and noted in the payload's `omitted` map. The result's top-level `recordedAt` names this run's archive directory, and `Read`ing its `result.json` gives the untruncated payloads. Whenever an `omitted` marker hides a field the diagnosis needs, read the archive instead of reasoning around the gap.
-
-Reading terms: `x@3@05` is a symbolic constant for program variable `x` (numbers are internal versions — successive assignments create new versions). Integers are boxed: `__prim__int___box__`/`int___unbox__` wrap between Python ints and SMT ints, and `_checkDefined(_, x, id)` wraps variable reads (it is identity on the value). `QA x :: body` is a universal quantifier. Pure functions appear applied to a snapshot argument first (`ipow(_, b, e)`).
-
-
-
-#### Interpreting `reasonUnknown`
-For most failures, start by understanding why the SMT-query failed, which is given in the `reasonUnknown` field:
-
-| Value | Meaning | Strategy |
-|---|---|---|
-| `(incomplete quantifiers)` | E-matching gave up: the instantiation chain to the proof was never triggered (under-instantiation). More solver time will not help. | If the failing goal is numerically obvious over ints, check the int-identity trap. Otherwise restate the missing fact as a GROUND fact placed where it is always visible: as a postcondition or a local `Assert`. Add only facts the payload shows are missing: speculative extra ground facts feed the instantiation engine and can slow everything down. For quantified goals, also check TRIGGER VOCABULARY: do the premise quantifiers' trigger terms occur under the goal's binder? If not, add a bridging quantified `Assert` whose trigger matches the goal's vocabulary and whose body mentions the premise triggers. |
-| `canceled` | The budget ran out while the solver was still working. | One diagnostic probe is worth it: re-run once with ~10x `assertTimeout` and read `rlimitDelta`. If it stops well below the new budget (reason flips to an incompleteness class), time was never the issue. If it scales with the budget, the proof is genuinely slow — apply the `nagini-performance` skill's budget policy and strategies. |
-| `(incomplete (theory arithmetic))` | Nonlinear integer arithmetic (products, `//`, `%` of variables) is beyond the solver. | More time will not help. Restate the proof with stepping stones that avoid division/modulo OF PRODUCTS entirely: use the Euclid identity (`a == (a // d) * d + a % d`), pure polynomial identities (products may appear; the solver normalizes them), and the bounded-multiple inference (`0 <= m * d < d` implies `m == 0`). `(k * d) // d == k` and `(k * d) % d == 0` are NOT directly provable — derive them via the chain above. |
-
-#### The int-identity trap
-
-A special case of `(incomplete quantifiers)` worth checking before anything else: the failing fact is *numerically obvious* over ints — `PSeq(y) == PSeq(x)` from `y == x`, a `f(y)` fact not transferring to `f(x)` for `@Pure` `f`, `x in s` from `1 in s and x == 1`, a goal embedding `(1 if v == x else 0)`. The cause is that `x` is not known to be exactly `int` (the static type admits subclasses such as `bool`), so `==` gives value equality but not the object identity these positions need — semantics and failing shapes in the `nagini-language` reference, Integers → Typing.
-
-The fix: ensure the type of the variables involved is exactly `int`, excluding subtypes, via **`type(x) == int`**. State it where you state any other fact about `x`, and carry it along like a permission.
-
-| Place | Write |
-|---|---|
-| `int` parameter | `Requires(type(x) == int)` |
-| `int` return value | `Ensures(type(Result()) == int)` |
-| `int` field | `type(self.n) == int` next to `Acc(self.n)` in the predicate / postcondition of `__init__` |
-| contents of a `List[int]` / `Set[int]` / `PSeq[int]` | `Forall(xs, lambda e: (type(e) == int, []))` in the same pre/post/invariant as `list_pred(xs)` — the element form; it is preserved across `append` of exact ints and through loops that build the list, whereas the index form `Forall(int, lambda i: Implies(0 <= i and i < len(xs), type(xs[i]) == int))` needs extra frame assertions after each mutation |
-| loop counter / accumulator | `Invariant(type(i) == int)` (preserved by `i += 1`) |
-| `Forall(int, ...)` whose body identifies `i` (membership, `@ContractOnly`) | add `type(i) == int` to the guard: `Implies(type(i) == int and lo <= i and i < hi, ...)`. The guard then has to be discharged at every use: the concrete index must carry its own `type(x) == int` fact (parameter: `Requires`; local: `Assert`), or the instantiation silently fails. Leave the guard out when the body does not need it |
-
-If no `type(x) == int` fact can be carried to a use site (e.g. an element read from a `List[int]` verified without an element-type invariant), use the fact that every arithmetic result is exactly `int`: `f(x + 0)` supports the identity reasoning that `f(x)` lacks. A local rescue only, for when proper typing is not possible.
-
-#### Interpreting `state.heap`
-A `insufficient.permission`, `fold.failed`/`unfold.failed`, or `leak_check.failed` diagnostic means that a required permission chunk or obligation could not be exhaled. Start from the heap listing `state.heap`, which is a short list of what the path holds at the failure: `resource(receiver; snapshot) # amount`. Compare it against what the failing construct demands (`failedAssertion` names the demanded chunk). The read classifies the failure into one of two shapes:
-
-**The demanded chunk is absent:**
-
-| What you see in `state.heap` | Cause |
-|---|---|
-| A folded predicate chunk (`Box_mypred(...; x) # W`) and the demanded field/`dict_pred`/`list_pred` chunk is absent | The permission is **inside the folded predicate** — access it under `Unfolding(...)` / add `Unfold` on this path |
-| The chunk existed in `state.oldHeaps['old']` but is gone from `state.heap` | **Consumed along the path** — by a `Fold`, or by a call that did not return it; walk the statements between entry and failure |
-| The heap is empty or unrelated on this branch | The contract/invariant never provided it on this path — check `branchConditions` for which path, then the precondition or invariant |
-
-**A matching chunk is present but not provably applicable:**
-
-| What you see in `state.heap` | Missing fact |
-|---|---|
-| A **conditional/quantified chunk** covering the receiver under a guard (`QA r,s :: MyPred(r,s) -> ... # (r == r_0 && s == s_0 ? W : Z)`) | The solver cannot prove your receiver satisfies the guard / lies in the quantified domain — assert the guard equalities as ground facts before the failing point |
-| The chunk on a **different receiver symbol** than the demanded one (`self_2@10` held, `self@14` demanded) | A receiver equality (aliasing fact) is missing — or the expression genuinely evaluates against the wrong object |
-| The chunk with a **symbolic amount** (`# $k@50`) | The solver cannot prove the amount suffices (`$k > 0`, `$k >= 1/2`, ...) — assert where the fraction came from |
-| The chunk fractional (`# 1/2`) where a write or full-permission fold is demanded | Deliberate split not reassembled — see the spec's permission accounting |
-| A `MustTerminate`/obligation chunk in a `leak_check.failed` | Read the obligation measures in `failedAssertion` — the inequality states the budget deficit directly (e.g. a callee's `MustTerminate` measure not strictly below the caller's remaining budget) |
-
-#### Fact failures — worked example
-
-A loop that swaps `heap[pos]` and `heap[parent]` fails its invariant with
-`invariant.not.preserved:assertion.false`, reason `Assertion ToMS(ToSeq(heap)) == Old(ToMS(ToSeq(heap))) might not hold`, and this payload (abridged):
-
-```json
-{
-  "failedAssertionPretty": "PMultiset___eq__((_, (_, _)),
-      __toMS(PSeq___sil_seq__(_, heap)), Old(__toMS(...)))",
-  "reasonUnknown": "(incomplete quantifiers)",
-  "rlimitDelta": 4500000,
-  "branchConditions": [],
-  "assumptions": ["issubtype(typeof(heap), list(int))",
-                   "PSeq___update__(_, sq, pos, tmp) == ..."],
-  "state": {"store": "TreeSeqMap(heap -> heap@13@07, pos -> pos@4@07, ...)",
-             "heap": ["list_acc(heap@13@07; sm@8@01, 1/1)"]}
-}
-```
-
-Read it in this order:
-1. `reasonUnknown` is `(incomplete quantifiers)` and `rlimitDelta` sits exactly at the budget (500ms × 9000) — the instantiation search was still churning when the cap hit. Strategy row 1 applies: do **not** re-run with a bigger budget.
-2. The goal (pretty form) is a multiset equality over `__toMS(...)` of the sequence; the `assumptions` list has facts about `PSeq___update__` (the element writes) but **nothing connecting a sequence update to its `__toMS` image** — the bridge the goal needs is absent, not slow.
-3. `state.store` shows `heap` still bound to the same version (`heap@13@07`) on both sides — so the failure is not a havocked variable; it really is the missing seq-to-multiset bridging fact.
-
-Fix accordingly: state the bridge as a ground stepping stone before the invariant re-check — `Assert(ToMS(ToSeq(heap)) == old_ms - PMultiset(a, b) + PMultiset(b, a))`-style — or extract a `lemma_seq_update_multiset` with that postcondition and call it after the two writes.
-
-##### Permission failures — worked example
-
-A pure helper fails with `application.precondition:insufficient.permission` ("There might be insufficient permission") and this payload (abridged):
-
-```json
-{
-  "failedAssertion": "... dict_acc(self._fwd, ...) ...",
-  "reasonUnknown": "(incomplete quantifiers)",
-  "state": {"store": "TreeSeqMap(self -> self_2@10@06, key -> key@4@06, ...)",
-             "heap": ["Box_pair_state(sm@14@06; self_2@10@06) # W"]}
-}
-```
-
-Read it in this order:
-1. `state.heap` — one chunk: the folded predicate `pair_state(self_2)` at full permission, and nothing else. The `dict_acc(self._fwd)` the application demands is not in the heap, so it must live **inside the folded predicate**: the cause is identified before any probe. The call must be wrapped in `Unfolding(self.pair_state(), ...)`, or the function's own precondition must require the predicate and the body unfold it.
-2. Cross-check receivers: the held chunk's receiver (`self_2@10@06`) matches the store's binding for `self` — so this is a folding problem, not an aliasing problem. If they differed, the fix would instead be establishing the aliasing fact or evaluating against the right object.
-3. `reasonUnknown` still gets a look, as a sanity check rather than the router. Here it says `(incomplete quantifiers)`, which adds nothing beyond the heap read (the exhale search gave up — expected when the chunk is plainly absent).
-
-
-### Adding probe asserts
-To further understand the failure and also help it with explicit intermediate facts, you can insert probe asserts. Before the failing assertion, insert additional assertions and re-run the verifier. Insert several `Assert(...)` probes at once. Every passing probe confirms a fact the solver knows; the first failing one pinpoints the missing step. 
-
-If an intermediate assert fails, then you can repeat the process on this assertion to narrow down the failure. Otherwise, you can add more intermediate asserts.
 Often the probes themselves are the fix. A few well-placed `Assert(...)` statements give the solver the intermediate facts (or quantifier triggers) it needs to discharge the original goal. When that happens, you are done: keep the asserts that hold the verification together and skip creating and verifying a candidate.
 
-#### Choosing probe asserts
+### Choosing probe asserts
 
 To pick candidate intermediate facts to probe with, use the patterns below. You can use multiple strategies at once.
 
-**Explicit failing SMT-queries**: the `failedAssertion` term is the exact obligation the solver could not prove. Translate it back to Python and assert it before the failing point.
+**Explicit failing SMT-queries**: the `failedAssertion` term (see below) is the exact obligation the solver could not prove. Translate it back to Python and assert it before the failing point.
 
 **Weakest-precondition backtracking** to move a failing assert earlier. To debug a failing `assert P`, move it earlier by computing the weakest precondition over the preceding statement. Repeat until the assert passes (bug is between the two positions) or reaches method entry (precondition too weak).
 
@@ -242,49 +114,86 @@ When a fold fails, assert each component of the predicate body separately (witho
 
 `state.heap` at the failure already gives you the acquired-minus-consumed inventory for free; trace manually to find *which statement* along the path consumed a chunk the heap read showed missing.
 
-### Reduce to a self-contained candidate
+## Interrogate the verifier
+
+Never guess the reason for a failure — extract it. The failing diagnostic carries evidence (the location, the reason, and the `debug` payload), and the verify tools produce more of it on demand: re-verification with different flags or budgets, the untruncated archive, the Viper encoding. Use them actively: every question of the form "what did the verifier actually see or do here?" has a tool answer.
+
+If the issue is a timeout, consult the `nagini-performance` skill.
+
+Often, it is useful to pass `include_viper: true` to any verify tool to get the translated Viper program as `viperProgram`. How an operator, builtin, or contract clause is actually encoded determines what the solver can possibly derive about it. Even small files translate to hundreds of lines, so ideally request it on a reduced snippet, not the full module.
+
+If a failing diagnostic has no `debug` field, the server was launched without SMT-state collection; pass `viper_args: ["--smtStateOnError", "--assertTimeout=500", "--reportReasonUnknown"]` yourself.
+
+Each failing diagnostic's `debug` object contains the symbolic state at the failure, expressed in the verifier's internal term language:
+
+| Field | Content | Use it to |
+|---|---|---|
+| `failedAssertion` | The exact goal term the solver could not prove | See the obligation as the solver sees it (after encoding), not as you wrote it |
+| `failedAssertionPretty` | The same goal with `@line@col` suffixes stripped and `_checkDefined` shims unwrapped | Read the goal quickly; fall back to the raw term when versions matter |
+| `reasonUnknown` | Why the solver returned unknown (see table below) | **Choose the fix strategy** |
+| `rlimitDelta` | Prover resources the failing check consumed, in Z3 rlimit units (the budget is `assertTimeout` ms × 9000) | A delta at the budget means the cap bound the check; a delta well below it means the solver stopped on its own |
+| `assumptions` | Path-condition terms in scope at the failure, pre-filtered to those sharing a symbol with `failedAssertion` (an `omitted` marker counts the rest) | Scan for gross absences and anomalies. To test whether a specific fact is available, probe it with `Assert` — presence in this list is neither necessary nor sufficient for derivability |
+| `branchConditions` | The branch decisions leading to the failing path | Identify which control-flow path fails |
+| `state.store` / `state.heap` / `state.oldHeaps` | Local variables, and the heap as a list of chunks (`resource(receiver; snapshot, permission)`) | Trace which symbolic value a variable holds; spot havocked (freshly re-assigned) values after calls; see which permissions the path actually holds |
+
+Bulk fields — the full SMT session (`proverEmits`), the background axioms (`preambleAssumptions`), and the symbol declarations (`functionDecls`/`macroDecls`) — are collected and archived server-side. Oversized results also are truncated in `debug` and noted in the payload's `omitted` map. The result's top-level `recordedAt` names this run's archive directory, and `Read`ing its `result.json` gives the untruncated payloads. Whenever an `omitted` marker hides a field the diagnosis needs, read the archive instead of reasoning around the gap.
+
+Reading terms: `x@3@05` is a symbolic constant for program variable `x` (numbers are internal versions — successive assignments create new versions). Integers are boxed: `__prim__int___box__`/`int___unbox__` wrap between Python ints and SMT ints, and `_checkDefined(_, x, id)` wraps variable reads (it is identity on the value). `QA x :: body` is a universal quantifier. Pure functions appear applied to a snapshot argument first (`ipow(_, b, e)`).
+
+
+### Interpreting `reasonUnknown`
+For most failures, start by understanding why the SMT-query failed, which is given in the `reasonUnknown` field:
+
+| Value | Meaning | Strategy |
+|---|---|---|
+| `(incomplete quantifiers)` | E-matching gave up: the instantiation chain to the proof was never triggered (under-instantiation). More solver time will not help. | If the failing goal is numerically obvious over ints, check the int-identity trap. Otherwise restate the missing fact as a GROUND fact placed where it is always visible: as a postcondition or a local `Assert`. Add only facts the payload shows are missing: speculative extra ground facts feed the instantiation engine and can slow everything down. For quantified goals, also check TRIGGER VOCABULARY: do the premise quantifiers' trigger terms occur under the goal's binder? If not, add a bridging quantified `Assert` whose trigger matches the goal's vocabulary and whose body mentions the premise triggers. |
+| `canceled` | The budget ran out while the solver was still working. | One diagnostic probe is worth it: re-run once with ~10x `assertTimeout` and read `rlimitDelta`. If it stops well below the new budget (reason flips to an incompleteness class), time was never the issue. If it scales with the budget, the proof is genuinely slow — apply the `nagini-performance` skill's budget policy and strategies. |
+| `(incomplete (theory arithmetic))` | Nonlinear integer arithmetic (products, `//`, `%` of variables) is beyond the solver. | More time will not help. Restate the proof with stepping stones that avoid division/modulo OF PRODUCTS entirely: use the Euclid identity (`a == (a // d) * d + a % d`), pure polynomial identities (products may appear; the solver normalizes them), and the bounded-multiple inference (`0 <= m * d < d` implies `m == 0`). `(k * d) // d == k` and `(k * d) % d == 0` are NOT directly provable — derive them via the chain above. |
+
+### The int-identity trap
+
+A special case of `(incomplete quantifiers)` worth checking before anything else: the failing fact is *numerically obvious* over ints — `PSeq(y) == PSeq(x)` from `y == x`, a `f(y)` fact not transferring to `f(x)` for `@Pure` `f`, `x in s` from `1 in s and x == 1`, a goal embedding `(1 if v == x else 0)`. The cause is that `x` is not known to be exactly `int` (the static type admits subclasses such as `bool`), so `==` gives value equality but not the object identity these positions need — semantics and failing shapes in the `nagini-language` reference, Integers → Typing.
+
+The fix: ensure the type of the variables involved is exactly `int`, excluding subtypes, via **`type(x) == int`**. State it where you state any other fact about `x`, and carry it along like a permission.
+
+| Place | Write |
+|---|---|
+| `int` parameter | `Requires(type(x) == int)` |
+| `int` return value | `Ensures(type(Result()) == int)` |
+| `int` field | `type(self.n) == int` next to `Acc(self.n)` in the predicate / postcondition of `__init__` |
+| contents of a `List[int]` / `Set[int]` / `PSeq[int]` | `Forall(xs, lambda e: (type(e) == int, []))` in the same pre/post/invariant as `list_pred(xs)` — the element form; it is preserved across `append` of exact ints and through loops that build the list, whereas the index form `Forall(int, lambda i: Implies(0 <= i and i < len(xs), type(xs[i]) == int))` needs extra frame assertions after each mutation |
+| loop counter / accumulator | `Invariant(type(i) == int)` (preserved by `i += 1`) |
+| `Forall(int, ...)` whose body identifies `i` (membership, `@ContractOnly`) | add `type(i) == int` to the guard: `Implies(type(i) == int and lo <= i and i < hi, ...)`. The guard then has to be discharged at every use: the concrete index must carry its own `type(x) == int` fact (parameter: `Requires`; local: `Assert`), or the instantiation silently fails. Leave the guard out when the body does not need it |
+
+If no `type(x) == int` fact can be carried to a use site (e.g. an element read from a `List[int]` verified without an element-type invariant), use the fact that every arithmetic result is exactly `int`: `f(x + 0)` supports the identity reasoning that `f(x)` lacks. A local rescue only, for when proper typing is not possible.
+
+### Interpreting `state.heap`
+A `insufficient.permission`, `fold.failed`/`unfold.failed`, or `leak_check.failed` diagnostic means that a required permission chunk or obligation could not be exhaled. Start from the heap listing `state.heap`, which is a short list of what the path holds at the failure: `resource(receiver; snapshot) # amount`. Compare it against what the failing construct demands (`failedAssertion` names the demanded chunk). The read classifies the failure into one of two shapes:
+
+**The demanded chunk is absent:**
+
+| What you see in `state.heap` | Cause |
+|---|---|
+| A folded predicate chunk (`Box_mypred(...; x) # W`) and the demanded field/`dict_pred`/`list_pred` chunk is absent | The permission is **inside the folded predicate** — access it under `Unfolding(...)` / add `Unfold` on this path |
+| The chunk existed in `state.oldHeaps['old']` but is gone from `state.heap` | **Consumed along the path** — by a `Fold`, or by a call that did not return it; walk the statements between entry and failure |
+| The heap is empty or unrelated on this branch | The contract/invariant never provided it on this path — check `branchConditions` for which path, then the precondition or invariant |
+
+**A matching chunk is present but not provably applicable:**
+
+| What you see in `state.heap` | Missing fact |
+|---|---|
+| A **conditional/quantified chunk** covering the receiver under a guard (`QA r,s :: MyPred(r,s) -> ... # (r == r_0 && s == s_0 ? W : Z)`) | The solver cannot prove your receiver satisfies the guard / lies in the quantified domain — assert the guard equalities as ground facts before the failing point |
+| The chunk on a **different receiver symbol** than the demanded one (`self_2@10` held, `self@14` demanded) | A receiver equality (aliasing fact) is missing — or the expression genuinely evaluates against the wrong object |
+| The chunk with a **symbolic amount** (`# $k@50`) | The solver cannot prove the amount suffices (`$k > 0`, `$k >= 1/2`, ...) — assert where the fraction came from |
+| The chunk fractional (`# 1/2`) where a write or full-permission fold is demanded | Deliberate split not reassembled — see the spec's permission accounting |
+| A `MustTerminate`/obligation chunk in a `leak_check.failed` | Read the obligation measures in `failedAssertion` — the inequality states the budget deficit directly (e.g. a callee's `MustTerminate` measure not strictly below the caller's remaining budget) |
+Worked payload reads — a fact failure and a permission failure — are in `references/debugging-examples.md`.
+
+## Minimal reproduction
+
+When the missing fact resists inline asserts and digging into the diagnostics does not provide a solution, capture the failure in a minimal, self-contained Python file and attack it in isolation.
 
 After locating the facts that hold at the failure site (every probe assert that passed) and the one that doesn't (the failing fact), create a **candidate lemma**: holding facts become preconditions, the failing fact becomes the postcondition, the body starts as `pass`.
-
-**Procedure.**
-
-1. **Build the candidate.** Create `<method>_repro.py`. Define a fresh function with:
-- **Parameters:** exactly the variables referenced in its pre- and postconditions. No return value.
-- **Postcondition:** the identified failing assertion.
-- **Preconditions:** a selection of passing asserts in the original method at or before the failure site — if you want to use a fact that isn't yet asserted there, go assert it in the original first; if the assert passes, you may include it, if it fails, the fact does not actually hold there and is not a valid precondition. Pick the **minimal** subset of those passing asserts that you believe should suffice.
-- **Body:** `pass`.
-2. **Output.** Hand Phase 3 the candidate file `<method>_repro.py`. Phase 2 does not edit the original source.
-
-## Phase 3: Fix
-
-### Verify the candidate
-
-Make the candidate verify. Apply the same probing technique as Phase 2's locate stage: add asserts and run the verifier. When the body needs real proof machinery, consult `references/proof-techniques.md` for the technique templates.
-
-When writing a proof body, follow two rules:
-
-**Add only what the diagnosis shows is missing.** Phase 2 ends with a located missing step; each addition responds to it, and each new failure gets the same Phase-2 reading.
-
-**Never pre-plan a full proof.** Do not look at the goal and think "this will need induction with three cases and two helper lemmas" before trying anything. That reasoning leads to proof bloat. Let the verifier fail first, then react to what it actually needs.
-
-Real proof machinery is needed where the SMT solver structurally struggles — inductive properties over recursive structures, multi-step heap reasoning through predicate chains, properties relating a recursive function's calls at different arguments, and cross-predicate reasoning connecting facts about different abstract states. The signal: verification fails even though the property is intuitively true, and no amount of assertion/invariant strengthening fixes it.
-
-There are three possible outcomes:
-
-- **Nothing required.** The reduced context proved the failing fact for free. Promote the candidate to a lemma and apply it in the original method.
-- **Just asserts.** A flat sequence of `Assert(...)` statements (or non-recursive lemma calls) makes the body verify. Try inlining them at the failure site in the original method. If that verifies, no lemma is needed — delete the candidate file. If not, promote to a lemma and call it.
-- **Real proof machinery.** The body needs induction, fuel decrement, `Unfolding`, case analysis, or recursive lemma calls. Promote to a lemma and call it from the original method.
-
-### Loop invariant structure
-
-A complete set of loop invariants typically covers:
-1. **Bounds**: `0 <= i and i <= n`
-2. **Permissions**: `Acc(list_pred(items))` or `Acc(obj.field)`
-3. **Progress property**: what has been computed for elements `[0..i)`
-4. **Current state**: properties of loop variables
-5. **Pure function facts**: restate pure-function preconditions the loop body needs (e.g., `Invariant(is_sorted(ToSeq(a)))`)
-
-### Lemma functions
 
 A **lemma** is a function whose preconditions state assumptions, postconditions state the conclusion, and the body is the proof. Lemmas are always `@Ghost` and always carry a termination measure; the technique templates in `references/proof-techniques.md` show only the proof structure and omit that boilerplate. A pure lemma returns `bool` with the proof written as an expression:
 
@@ -298,6 +207,21 @@ def lemma_property_name(params: Type) -> bool:
     return True
 ```
 
+**Procedure.**
+
+1. **Build the candidate.** Create `<method>_repro.py`. Define a fresh function with:
+- **Parameters:** exactly the variables referenced in its pre- and postconditions. No return value.
+- **Postcondition:** the identified failing assertion.
+- **Preconditions:** a selection of passing asserts in the original method at or before the failure site — if you want to use a fact that isn't yet asserted there, go assert it in the original first; if the assert passes, you may include it, if it fails, the fact does not actually hold there and is not a valid precondition. Pick the **minimal** subset of those passing asserts that you believe should suffice.
+- **Body:** `pass`.
+2. **Verify the candidate.** Make it verify without editing the original source: probe asserts and interrogation apply to the candidate exactly as to the original. When the body needs real proof machinery, consult `references/proof-techniques.md` for the technique templates.
+
+There are three possible outcomes:
+
+- **Nothing required.** The reduced context proved the failing fact for free. Promote the candidate to a lemma and apply it in the original method.
+- **Just asserts.** A flat sequence of `Assert(...)` statements (or non-recursive lemma calls) makes the body verify. Try inlining them at the failure site in the original method. If that verifies, no lemma is needed — delete the candidate file. If not, promote to a lemma and call it.
+- **Real proof machinery.** The body needs induction, fuel decrement, `Unfolding`, case analysis, or recursive lemma calls. Promote to a lemma and call it from the original method.
+
 ### Lemma promotion procedure
 
 Promotion is mostly mechanical: the candidate is already a verified, lemma-shaped function. This step just gives it a permanent home.
@@ -306,28 +230,28 @@ Promotion is mostly mechanical: the candidate is already a verified, lemma-shape
 **Contract interface.** Designing the lemma contract correctly is crucial to actually achieving the desired verification goal and performance benefits. Phrase the contract so that instantiation lands on the caller's exact goal terms. Often it is better to take those expressions as parameters instead of baking their values in as constants: a conclusion over a constant leaves the caller to rewrite its term into that shape in its own, expensive context. The same principle cuts the other way: every heavy term the contract mentions must be proven or is re-imported at each call site.
 
 **Procedure.**
-1. Rename the Phase 2 candidate `<method>_repro.py` to `lemma_<lemma_name>.py`. 
+1. Rename the candidate `<method>_repro.py` to `lemma_<lemma_name>.py`. 
 By default the lemma is a `@Ghost` method. Use `@Ghost @Pure` with `Decreases` only if the lemma must be invoked from a pure context (inside another `@Pure` function, a predicate body, or any other place that admits only pure expressions).
 2. Import the lemma into the source file and invoke it where the missing step is. Continue verifying the original method.
 
-# Stuck criteria
+## Dead ends
+Never give up until you have tried all of the strategies above.If you have tried all the strategies above and are not longer making progress on understanding the failure, you can report a dead end. 
 
-Verification iteration is bounded; recognise stuck-ness early so the budget is not burned on the same wrong direction:
+Demonstrate it with a minimal snippet pair: the minimal failing shape and all the collected evidence about what fails on which layer (encoding, SMT) and why. 
 
-- **Same verification error on the same source line twice in a row.** The next attempt must be a Phase 2 probing step (not another fix). A repeated identical error means the previous fix did not address the actual missing step; probing will reveal where the missing step actually sits.
-- **Same verification error on the same source line three times in a row.** Stop iterating. Report the missing step you have identified, the strategies tried, and your best hypothesis for why it is hard to discharge. Recommend whether the spec needs redesign, whether a proof technique is needed, or whether the limitation is a Nagini bug.
+Recommend whether the spec needs redesign, whether a proof technique is needed, or whether the limitation is a Nagini bug.
 
 # Resources
 
 ## references/debugging-examples.md
-Three worked debugging examples showing the full diagnose-probe-fix arc in Nagini/Python syntax: permission leak in loop, weak loop invariant, and bridging index-based to value-based sequence reasoning with an inductive lemma pair.
+Worked debugging examples: two payload reads (a fact failure and a permission failure) and three full diagnose-probe-fix arcs in Nagini/Python syntax — permission leak in loop, weak loop invariant, and bridging index-based to value-based sequence reasoning with an inductive lemma pair.
 
 ## references/proof-techniques.md
 Proof-technique templates for lemma bodies — structural induction, case analysis, proof chaining, loop-based universal proofs — and the lemma catalog (content, preservation, equivalence, bound) as a vocabulary for the kind of fact you are proving.
 
 # Appendix: Symptom Diagnostic Table
 
-Quick-reference for mapping a verification error or symptom to its likely cause and concrete fix. The Phase 1-2 procedure remains the disciplined approach; this table only catalogs symptom→cause→fix pairs and assumes you have already isolated the failing assertion.
+Quick-reference for mapping a verification error or symptom to its likely cause and concrete fix. The strategies above remain the disciplined approach; this table only catalogs symptom→cause→fix pairs and assumes you have already isolated the failing assertion.
 
 | Symptom | Common causes | Fix with code edits | Fix annotations only |
 |---|---|---|---|
@@ -342,7 +266,4 @@ Quick-reference for mapping a verification error or symptom to its likely cause 
 | "Precondition might not hold" / call might fail | Caller doesn't establish what the callee requires | Establish the missing precondition before the call | Same |
 | Method verifies but caller fails | Postcondition too weak — caller needs a guarantee the method doesn't provide | Strengthen postcondition | Same |
 | Fact about a field/container provable before a call, unprovable after it (`state.store` shows the value re-assigned across the call) | Callee's `Ensures` re-grants permission to the location without stating value/content preservation — the call havocs it | Add the frame condition to the callee's `Ensures` (e.g. `ToSeq(x.xs) == Old(ToSeq(x.xs))`) | Report as a contract weakness — a missing frame condition cannot be recovered caller-side |
-| Error disappears when unrelated code is added | Self-framing — the extra code incidentally provides a needed permission | Make the permission explicit in the contract | Same |
-| "Function might not terminate" | Missing or incorrect termination measure | Add or fix `Decreases()` on the function/method | Same |
-| The failure holds on one `branchConditions` path only | The proof step differs per case; a straight-line body proves neither | Add an `if`/`else` matching the case split (proof-techniques: Case Analysis) | Same |
 | The goal relates a recursive function's values at different arguments (`f(xs)` vs `f(xs.drop(1))`) | The solver does not discover induction; the connecting fact needs an explicit inductive step | Add one recursive lemma call on the smaller structure (proof-techniques: Structural Induction) | Same |
