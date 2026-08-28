@@ -13,7 +13,7 @@ Contract and vocabulary shapes determine this cost before any proof is written, 
 
 A single-member verification takes seconds to low tens of seconds; contract-only stubs, predicates and small pure functions a few seconds; the per-check budget is rarely touched. A member that takes minutes is an outlier with a structural cause, not "a big function" — and slow verification is usually many cheap queries (paths × obligations), not a few hard ones. Slow predicates and small pure functions are frequently the real culprit behind a slow method, because their cost is paid again at every unfold or call site: look there before tuning the method.
 
-The `@ContractOnly` stub check is the cheapest performance test a contract has, and failing it is a blocking defect. A stub's well-formedness check should take seconds; more than ~30s means the encoding will not survive implementation — every method proof pays this cost again, multiplied by unfolds and call sites. Repackage the shape before strengthening the contract, not after: never carry an expensive vocabulary forward on the promise that proof effort will cope.
+The vocabular of a project is the biggest lever for performance. The `@ContractOnly` stubs, predicates and `@Pure` functions need to verify quickly, because they are used everywhere. If verification of these primitives takes longer than a few seconds, verification will likely fail. Fixing the vocabulary should always be the first priority, never carry an expensive vocabulary forward on the promise that proof effort will cope.
 
 ## Diagnosis
 
@@ -31,6 +31,8 @@ Three checks route a slow member to the right fix; run them in order.
 ## Budget policy
 
 Raised budgets are probes, not fixes. On a whole-run timeout, a single 2x `--timeout` re-run is a fair probe; beyond 2x more budget rarely helps — decompose rather than re-budget. For a single budget-bound check (`canceled`), up to 10x the default `assertTimeout` is an acceptable fix if the check closes within it; beyond 10x, restructure rather than re-budget.
+
+Every escalation is temporary: after the change it motivated, turn the budget back down and re-verify at the standard limits. A member that can only iterate under escalated budgets will drag the rest of the verification down permanently. Apply the fix catalog until the standard budgets carry it again.
 
 ## The fix catalog
 

@@ -116,9 +116,9 @@ When a fold fails, assert each component of the predicate body separately (witho
 
 ## Interrogate the verifier
 
-Never guess the reason for a failure — extract it. The failing diagnostic carries evidence (the location, the reason, and the `debug` payload), and the verify tools produce more of it on demand: re-verification with different flags or budgets, the untruncated archive, the Viper encoding. Use them actively: every question of the form "what did the verifier actually see or do here?" has a tool answer.
+Never guess the reason for a failure — extract it. The failing diagnostic carries evidence (the location, the `message`, the `reason`, and the `debug` payload), and the verify tools produce more of it on demand: re-verification with different flags or budgets, the untruncated archive, the Viper encoding. Use them actively: every question of the form "what did the verifier actually see or do here?" has a tool answer.
 
-If the issue is a timeout, consult the `nagini-performance` skill.
+A whole-run timeouts means you have a performance problem to solve. Switch to the `nagini-performance` skill and address the problem. Do not resume ordinary fix iteration until the source of the performance issue is resolved. Often this will require redesigning specs or moving expensive proofs into lemmas. 
 
 Often, it is useful to pass `include_viper: true` to any verify tool to get the translated Viper program as `viperProgram`. How an operator, builtin, or contract clause is actually encoded determines what the solver can possibly derive about it. Even small files translate to hundreds of lines, so ideally request it on a reduced snippet, not the full module.
 
