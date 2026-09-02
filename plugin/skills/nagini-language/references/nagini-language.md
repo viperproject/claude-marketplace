@@ -127,11 +127,13 @@ for x in xs:
 
 ## Permissions
 
-### Basic Permission
+### Permission Amounts
 
 ```python
 Acc(obj.field)          # Full (write) permission
 Acc(obj.field, 1/2)     # Fractional (read) permission
+Acc(obj.field, 1/d)     # Any int-valued expression, e.g. a parameter d >= 1
+Acc(pred(x), 1/2)       # Half of a predicate instance: every amount in its body halves
 ```
 
 ### Permission Arithmetic

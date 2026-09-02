@@ -56,7 +56,7 @@ The first approach is usually easier.
 
 Permissions are a conserved resource: each heap location has exactly one write unit in the whole system, split among callers, contracts, and folded predicates. Design the flow of that unit explicitly — where it sits before a call, during it, and after — and check that no point in the design requires more of a location than exists. Amounts must agree everywhere: a predicate's body, the contracts that fold it, and the postconditions that return it.
 
-Reserve full permission for what is actually mutated; every other holder takes a fraction. Whenever more than one party needs the same state at the same time, decide the split deliberately rather than giving each party full access. If write-access is needed after a split, you must plan how to reassemble the pieces to the whole permission.
+Reserve full permission for what is actually mutated; every other holder takes a fraction. Whenever more than one party needs the same state at the same time, decide the split deliberately rather than giving each party full access. If write-access is needed after a split, you must plan how to reassemble the pieces to the whole permission. When the number of readers is a known constant `n`, you can use a fixed fractions: a `1/n` share per reader, returned unchanged. When the number of readers is unknown or changes dynamically, make the amount a parameter of the method or predicate so that each caller can provide the amount of permission it actually holds. 
 
 ### Memory-safety layer and functional layer
 
