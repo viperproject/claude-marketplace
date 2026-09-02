@@ -4,7 +4,7 @@ A [Claude Code](https://claude.com/claude-code) plugin for formally verifying Py
 
 The plugin provides:
 
-- **Skills** — `nagini-language` (language and tooling reference with verified examples) and `handling-verification-errors` (debugging playbook).
+- **Skills** — `nagini-language` (language and tooling reference with verified examples), `spec-quality` (specification design principles), `handling-verification-errors` (debugging playbook), and `nagini-performance` (verification-cost model and shape catalog).
 - **MCP tools** — `verify_method` / `verify_snippet` for in-session verification with caching, via a bundled Nagini MCP server launcher.
 
 ## Prerequisites
@@ -54,7 +54,7 @@ Layout — the plugin itself lives in `plugin/`; everything outside it (tests, C
 
 - `.claude-plugin/marketplace.json` — same-repo marketplace (`viperproject`), pointing at `./plugin`
 - `plugin/.claude-plugin/plugin.json` — plugin manifest (no `version` field: versions track git commits while under active development)
-- `plugin/.mcp.json` — MCP server wiring: runs the pinned nagini via uvx, isolated from any Python environment on the machine. The single source of truth for the nagini and Python pins; both are env-overridable (`NAGINI_FROM`, `NAGINI_PYTHON`)
+- `plugin/.mcp.json` — MCP server wiring: runs the pinned nagini via uvx, isolated from any Python environment on the machine. The single source of truth for the nagini and Python pins; both are env-overridable (`NAGINI_FROM`, `NAGINI_PYTHON`). The `--with mcp>=1.2,<2` cap mirrors the bound in nagini's own `[mcp]` extra (mcp 2.0 removed the embedded FastMCP server API); it exists here because releases up to 1.3.1 shipped with unbounded metadata. Drop it once the launcher's default release carries the bound itself
 - `plugin/skills/<name>/SKILL.md` — skills, with supporting material in `references/` and `examples/`
 
 ## Troubleshooting

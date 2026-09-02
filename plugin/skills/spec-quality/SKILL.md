@@ -58,6 +58,10 @@ Permissions are a conserved resource: each heap location has exactly one write u
 
 Reserve full permission for what is actually mutated; every other holder takes a fraction. Whenever more than one party needs the same state at the same time, decide the split deliberately rather than giving each party full access. If write-access is needed after a split, you must plan how to reassemble the pieces to the whole permission.
 
+### Memory-safety layer and functional layer
+
+For more complex programs, it often makes sense to split the contract into two separable layers. The **memory-safety layer** makes calls admissible: the permissions a method takes and returns, the structure predicates it expects and re-establishes, and the well-definedness facts a caller needs, e.g. lengths, index ranges, non-`None`, non-zero divisors. The **functional layer** characterizes the results.
+
 ## Complete Correctness Properties
 
 You need to understand:
