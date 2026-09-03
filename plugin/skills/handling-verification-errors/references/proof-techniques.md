@@ -86,6 +86,10 @@ while k < size:
 
 ---
 
+## Formulation Diversity
+
+Before reporting a lemma or postcondition as unprovable, attempt at least two structurally different formulations: change the induction variable, generalize the hypothesis with an accumulator, or restate over one combined sequence/value instead of relating two.
+
 ## Lemma Catalog
 
 ### Content Lemma

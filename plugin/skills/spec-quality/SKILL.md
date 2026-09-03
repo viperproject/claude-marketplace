@@ -5,7 +5,7 @@ description: Specification quality principles for Nagini verification. Covers pr
 
 # Specification Quality
 
-Specifications here does not refer to loop invariants, lemmas or intermediate assertions. These are part of the verification of the implementation. Specifications refer to the method contracts (pre/postconditions) and the predicates and pure functions used in those contracts.
+Specifications here do not refer to loop invariants, lemmas or intermediate assertions. These are part of the verification of the implementation. Specifications refer to the method contracts (pre/postconditions) and the predicates and pure functions used in those contracts.
 
 There are two main parts to good specifications:
 - A good vocabulary (predicates, pure functions) that enables reasoning and proofs

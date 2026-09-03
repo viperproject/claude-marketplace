@@ -59,7 +59,10 @@ Fold might fail. There might be insufficient permission to access Acc(node.value
 
 ### Diagnosis
 
-**Read the diagnostic**: The verifier cannot fold `lseg(head)` because it can't find `Acc(head.value)`. Folding `lseg(head)` requires its body: `Acc(head.value)`, `Acc(head.next)`, and `lseg(head.next)`. For this failure class the `debug` payload answers directly: `state.heap` lists what the path holds at the failure, and a chunk present in `state.oldHeaps['old']` but absent from `state.heap` means it was consumed along the path.
+**Read the diagnostic**: The verifier cannot fold `lseg(head)` because it can't find `Acc(head.value)`. Folding `lseg(head)` requires its body: `Acc(head.value)`, `Acc(head.next)`, and `lseg(head.next)`.
+<!-- if errors -->
+For this failure class the `debug` payload answers directly: `state.heap` lists what the path holds at the failure, and a chunk present in `state.oldHeaps['old']` but absent from `state.heap` means it was consumed along the path.
+<!-- end -->
 
 **Reason about the gap**: Before the loop, we unfold `lseg(head)`, giving us `Acc(head.value)`, `Acc(head.next)`, and `lseg(head.next)`. The loop then advances `p` away from `head`. Each iteration unfolds the next node and moves `p` forward — but what happens to the previous node's permissions? The loop invariant only mentions `p`, nothing about `head` or any previously-visited nodes.
 
@@ -160,7 +163,12 @@ Postcondition of list_sum might not hold. Assertion Result() == seq_sum(ToSeq(a)
 
 ### Diagnosis
 
-**Read the diagnostic**: The verifier can't prove `total == seq_sum(ToSeq(a))` at the return point, after the loop. In the `debug` payload this shows as `state.store` binding `total` to a fresh symbol version after the loop — the havoc signature of a variable modified in the loop but unconstrained by its invariant.
+**Read the diagnostic**: The verifier can't prove `total == seq_sum(ToSeq(a))` at the return point, after the loop.
+<!-- if errors -->
+In the `debug` payload this shows as `state.store` binding `total` to a fresh symbol version after the loop — the havoc signature of a variable modified in the loop but unconstrained by its invariant.
+<!-- else -->
+The value of `total` after the loop is whatever the invariant says about it — a variable modified in the loop but unconstrained by its invariant is unknown afterwards.
+<!-- end -->
 
 **Reason about the gap**: This requires understanding how the verifier reasons about loops. After a loop completes, the verifier *only* knows:
 - What the loop invariant states
@@ -280,6 +288,7 @@ With these lemmas, the call site becomes straightforward — the loop's index-ba
 seq_not_contains(old_seq, x)  # Now verifies
 ```
 
+<!-- if errors -->
 ---
 
 ## Example: Reading a Fact-Failure Payload
@@ -325,3 +334,4 @@ Read it in this order:
 1. `state.heap` — one chunk: the folded predicate `pair_state(self_2)` at full permission, and nothing else. The `dict_acc(self._fwd)` the application demands is not in the heap, so it must live **inside the folded predicate**: the cause is identified before any probe. The call must be wrapped in `Unfolding(self.pair_state(), ...)`, or the function's own precondition must require the predicate and the body unfold it.
 2. Cross-check receivers: the held chunk's receiver (`self_2@10@06`) matches the store's binding for `self` — so this is a folding problem, not an aliasing problem. If they differed, the fix would instead be establishing the aliasing fact or evaluating against the right object.
 3. `reasonUnknown` still gets a look, as a sanity check rather than the router. Here it says `(incomplete quantifiers)`, which adds nothing beyond the heap read (the exhale search gave up — expected when the chunk is plainly absent).
+<!-- end -->
