@@ -9,6 +9,11 @@ description: Nagini language reference and verification tools. Provides the synt
 This skill provides the Nagini language reference, verified examples, and the verification tool contract.
 
 Nagini specifications are Python function calls (`Requires()`, `Ensures()`, `Acc()`, `Fold()`, etc.) from `nagini_contracts.contracts`. Nagini translates annotated Python into the Viper intermediate language and verifies with Silicon.
+<!-- if workflow -->
+<!-- else -->
+
+Three companion skills carry the methodology: load `handling-verification-errors` when verification fails repeatedly, `nagini-performance` when it is slow or times out, and `spec-quality` when designing contracts.
+<!-- end -->
 
 <!-- else -->
 This skill provides the Nagini language reference and the verification tool contract.
