@@ -252,19 +252,29 @@ Promotion is mostly mechanical: the candidate is already a verified, lemma-shape
 By default the lemma is a `@Ghost` method. Use `@Ghost @Pure` with `Decreases` only if the lemma must be invoked from a pure context (inside another `@Pure` function, a predicate body, or any other place that admits only pure expressions).
 2. Import the lemma into the source file and invoke it where the missing step is. Continue verifying the original method.
 
-## Concrete-value obligations
+## Function unrolling and concrete-value obligations
 
-Concrete-value obligations (`assert values(res) == [1, 3, 2]`), can fail because the verifier axiomatizes each `@Pure` function so that its definition unfolds only once per syntactic application. Here are some strategies to help with this:
+Some proof obligation (in particular concrete-value facts) may require multiple unfoldings of a pure function. The verifier by default unfolds a pure function only once per syntactic application, so such assertions may fail or time out.
 
-- **Write intermediate assertions that unfold the function**: 
-You can trigger the unrolling explicitly by asserting each step, e.g.: 
- `Assert(list_vals(n2) == Unfolding(node_pred(n2), PSeq(n2.val)))`
-  `Assert(list_vals(n2) == PSeq(3))`
+For example, consider a digits function that returns its digits via `PSeq(n % 10) + digits(n // 10)` for a given integer. An assert like `Assert(digits(1234) == PSeq(4, 3, 2, 1))` may fail. The solution is to break the proof into asserts that each need a single unfolding, from the innermost value outward:
 
-- **Disable limited functions** A quantified `Assert` whose trigger is a function application and whose body contains the function will cause infinite unrolling, for example
-  `Assert(Forall(PSeq[int], lambda s: (len(rev(s)) == len(s), [[rev(s)]])))`
-  `Assert(Forall(PSeq[int], lambda s: Forall(int, lambda g: (Implies(g >= 1, len(group_transform(s, g)) == len(s)), [[group_transform(s, g)]]))))`
-  Why it works: the trigger encodes as the *limited* application but the body as the *full* one, so every term an unrolling produces re-arms the definitional axiom. The body must be a true, non-trivial fact that contains the function. Its postcondition is the natural choice. Caution: this will make the solver diverge on applications to unconstrained symbolic arguments, only use this on concrete finite inputs.
+```python
+Assert(digits(1) == PSeq(1))
+Assert(digits(12) == PSeq(2, 1))
+Assert(digits(123) == PSeq(3, 2, 1))
+Assert(digits(1234) == PSeq(4, 3, 2, 1))
+```
+
+If the same value is needed in several places, or the chain is long enough to slow down the enclosing method, move it into a lemma so it is proved once and only its conclusion is used.
+
+Alternatively, there is a trick that removes the per-application limit for a single function: a quantified `Assert` whose trigger is the function application and whose body also contains the function. The body must be a true, non-trivial fact that contains the function, for example, the function's own postcondition:
+
+```python
+Assert(Forall(int, lambda n: (Implies(n >= 0, len(digits(n)) >= 1), [[digits(n)]])))
+Assert(digits(1234) == PSeq(4, 3, 2, 1))
+```
+
+Why it works: the body is unrolled once, this contains the recursive application, which triggers the quantifier again, which repeats the process one unfolding deeper. Caution: unconstrained function unrolling can lead to performance problems, in particular the solver will diverge if the such a function is applied to unconstrained symbolic arguments.
 
 ## Dead ends
 Never give up until you have tried all of the strategies above. If you have tried all the strategies above and are not longer making progress on understanding the failure, you can report a dead end. 

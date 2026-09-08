@@ -23,8 +23,8 @@ The reverse does not hold for performance limitations. An entry that says "times
 - **Limitation**: Connecting quantified membership facts to the concrete contents of a collection can be difficult or impossible. For example, a set `s` known only through "`x in s` iff `P(x)`" has no terms to trigger the solver, so you cannot derive e.g. the contents `Assert(s == PSet(1))` or its cardinality (`len(s)`) from that alone. 
   **Workaround**: Keep aggregates constructive: build collections operation by operation, or track the count in its own variable updated alongside every mutation. Keep cardinality out of `Decreases` measures.
 
-- **Limitation**: Bitwise operators on ints (`&`, `|`, `^`, `<<`, `>>`) encode through an int-to-bitvector bridge that is very expensive for the solver, especially under quantifiers or in loop invariants — proofs that touch them often time out.
-  **Workaround**: When values are nonnegative and the width permits, use the arithmetic equivalents instead (`x & 1` -> `x % 2`, `x >> k` -> `x // 2**k`, `x << k` -> `x * 2**k`); they verify orders of magnitude faster.
+- **Limitation**: Bitwise operators on ints (`&`, `|`, `^`, `<<`, `>>`) will cause verification time to explode. Every application converts its operands from the solver's integer theory into a fixed-width bitvector, applies the operation there, and converts the result back; the solver then has to relate facts across the two theories, which it does poorly. A value known only through equalities (a symbolic argument) is much worse than a literal.
+  **Workaround**: Never user bitwise operations, instead, express using integer arithmetic with constant divisors (`x & 1` -> `x % 2`, `x >> k` -> `x // 2**k`, `x << k` -> `x * 2**k`). This stays in one theory and is linear, so the solver evaluates it instantly. This is especially crucial for spec vocabulary (pure step functions, predicates, contracts).
 
 - **Limitation**: String support beyond the basics (literals, `+`, `len()`, equality). String methods, formatting, and slicing are largely unsupported.
   **Workaround**: Use lists of integers to represent strings when string reasoning is needed.
