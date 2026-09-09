@@ -44,5 +44,5 @@ The reverse does not hold for performance limitations. An entry that says "times
 - **Limitation**: User-defined `__lt__`/`__le__`/`__gt__`/`__ge__` dunders do not work with the `min()` and `max()` builtins — their contracts expect numeric types. A `@Pure` comparison dunder does drive the comparison operators (`<`, `<=`, `>`, `>=`).
   **Workaround**: For `min()`/`max()`, add explicit comparison-based helpers on the class and rewrite call sites.
 
-- **Limitation**: `for x in iterable:` loops are difficult to verify. The iterator holds part of the iterable's `list_pred` for the loop's duration and references the elements in a way that makes it hard to state anything about it in invariants. On top of that, the iterator translation has some bugs and rough edges that cause unexpected framing and permission failures.
-  **Workaround**: Use an indexed `while i < len(xs):` loop instead.
+- **Limitation**: `for x in c` loops  are difficult to verify. The encoding borrows permissions to `c` and adds hidden invariant conjuncts, so getting the invariants right is hard and unintuitive.
+  **Workaround**: Use an indexed `while i < len(xs):` loop whenever there is an index.

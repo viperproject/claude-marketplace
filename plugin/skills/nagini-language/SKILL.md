@@ -73,12 +73,9 @@ Re-verifying an unchanged member is waste either way — a cached method replays
 ## Resources
 
 ### references/nagini-language.md
-Core language reference: imports, contracts, permissions, predicates, pure functions, quantification, ghost code (ghost types, `@Ghost`, `GInt`, `MarkGhost`), sequences, sets, multisets, built-in functions, loops, termination, container predicates, type annotations, assert/assume, let bindings, equality. **Read this first when writing Nagini code.**
+The Nagini language reference: the specification constructs, their syntax and semantics, and the rules for using them. **Read this first when writing Nagini code.**
 
 <!-- if knowledge -->
-### references/nagini-advanced.md
-Advanced features beyond the core: exception contracts (`Exsures`, `RaisedException`), global/module-level variables, threads (`Thread`, `MayStart`, `Joinable`, `ThreadPost`, the `Joinable` conjunct bug). Load this only when working with code that raises exceptions, mutates module-level state, or spawns threads.
-
 ### references/limitations.md
 Confirmed Nagini limitations — what the language cannot express or prove, with workarounds. Consult before concluding that a property is inexpressible or that a workaround is needed; cited as the canonical authority for "is X really a Nagini limitation?" decisions.
 

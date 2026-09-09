@@ -97,6 +97,7 @@ def double(x: int) -> int:
 
     return 2 * x
 ```
+Nagini knows the type of `Result()`, but mypy does not. So while most uses will work, a construct that needs the *static* type of the expression, such as the element form of `Forall` over it, will fail with "Encountered Any type". To fix this, use `ResultT(S)` instead, where `S` is the type of the result.
 
 ### Old Values
 
@@ -113,18 +114,6 @@ def increment(self: Counter) -> None:
 
 `Old` of a reference-typed expression yields the old *reference*, not a snapshot of the object's contents. A container field still holds the same object after a call, so `self.xs == Old(self.xs)` compares a reference with itself and states nothing about the contents.
 
-### Previous (for-loops only)
-
-In a `for x in xs:` loop, `Previous(x)` is the PSeq of the loop variable's values from all previous iterations:
-
-```python
-s = 0
-for x in xs:
-    Invariant(Acc(list_pred(xs), 1 / 2))
-    Invariant(s == len(Previous(x)))   # iteration count so far
-    s += 1
-```
-
 ## Permissions
 
 ### Permission Amounts
@@ -135,6 +124,8 @@ Acc(obj.field, 1/2)     # Fractional (read) permission
 Acc(obj.field, 1/d)     # Any int-valued expression, e.g. a parameter d >= 1
 Acc(pred(x), 1/2)       # Half of a predicate instance: every amount in its body halves
 ```
+
+Reading a location needs any positive fraction. Writing needs the full permission.
 
 ### Permission Arithmetic
 
@@ -253,7 +244,7 @@ A `@property` getter is treated as a pure function automatically. Do not stack `
 
 ## ContractOnly Functions
 
-For specification-only functions that don't need an implementation:
+To specify functions without providing an implementation:
 
 ```python
 @ContractOnly
@@ -269,19 +260,18 @@ The verifier does not look at `@ContractOnly` bodies, the contract is **all the 
 There is no body to check a measure against, but callers need it: proving termination of anything that calls the stub — including using it as a specification function in contexts that must terminate — requires a `Decreases` measure on the stub itself.
 
 ## Quantification
-
-### Universal Quantifier
-
-Every `Forall` should provide an explicit trigger so Z3 knows when to instantiate it. A trigger is a list of terms (inside `[[...]]`) mentioning all bound variables; the quantifier fires whenever matching terms appear in the proof context.
+A quantifier is an expression that states a property holds for all or some values of a type or collection. A quantifier consists of the domain (type or collection), a lambda binding the quantified variable, a body expression and a trigger list.
 
 ```python
 Forall(int, lambda i: (
     Implies(0 <= i and i < n, arr[i] >= 0),
-    [[arr[i]]]  # Trigger
+    [[arr[i]]]
 ))
 ```
 
-#### Trigger rules
+<!-- if knowledge -->
+#### Triggers
+Every `Forall` should provide an explicit trigger. A trigger is a list of terms (inside `[[...]]`) mentioning all bound variables; the quantifier fires whenever matching terms appear in the proof context.
 
 - Every quantifier needs a trigger; nested quantifiers each need one (not just the innermost).
 - An empty trigger list `[]` tells the solver to infer one. This can lead to unpredictable instantiation behavior.
@@ -303,7 +293,7 @@ Forall(int, lambda i: (
 
 #### Quantifying over a collection
 
-The first argument to `Forall` does not have to be a type — it can also be a collection value (a `list`, `PSeq`, `PSet`), in which case the bound variable ranges over the *elements* of that collection rather than over all values of a type. The element-form quantifier avoids the `0 <= i < len(xs)` guard and triggers on element-level expressions.
+The first argument to `Forall` does not have to be a type — it can also be a collection value (a `list`, `set`, `dict`, `PSeq` or `PSet`), in which case the bound variable ranges over the *elements* (or keys) of that collection, rather than over all values of a type. The element-form quantifier avoids the `0 <= i < len(xs)` guard and triggers on element-level expressions.
 
 ```python
 xs: List[int] = ...
@@ -346,6 +336,7 @@ def streams_injective(streams: Dict[int, Stream]) -> bool:
                 streams[k1] is not streams[k2]),
         [[streams[k1], streams[k2]]]))
 ```
+<!-- end -->
 
 ## Ghost Code
 
@@ -396,49 +387,13 @@ def counted_sum(l: List[int]) -> Tuple[int, GIdx]:
 
 `@Ghost` marks a whole def (or class) as ghost. Ghost functions may be called from specs and as ghost statements in regular code, but never where the result reaches regular execution. Ghost code must provably terminate: a `@Ghost` method needs `Requires(MustTerminate(measure))` (see Termination), a `@Ghost @Pure` function proves termination via `Decreases` as usual.
 
-**A `@Pure` helper over ghost values must be `@Ghost @Pure`.** A plain `@Pure` function taking a `PSeq` and returning `bool` or `int` is rejected (`invalid.ghost.return` — the result is ghost, the annotated return type is not):
+**A `@Pure` helper over ghost values must be `@Ghost @Pure`.** A plain `@Pure` function taking a `PSeq` and returning `bool` or `int` is rejected. The same applies to lemma *methods* over ghost values — a lemma taking a `PSeq` must be `@Ghost` (plus `MustTerminate`); a bare call to it in a regular body is a ghost statement.
 
-```python
-@Ghost
-@Pure
-def is_sorted(a: PSeq[int]) -> bool:
-    return Forall2(int, int, lambda i, j: (
-        Implies(0 <= i and i < j and j < len(a), a[i] <= a[j]),
-        [[a[i], a[j]]]))
-```
+## Containers
 
-The same applies to lemma *methods* over ghost values — a lemma taking a `PSeq` must be `@Ghost` (plus `MustTerminate`); a bare call to it in a regular body is a ghost statement:
+### Ghost containers
 
-```python
-@Ghost
-def seq_sum_step(s: PSeq[int], i: int) -> None:
-    Requires(MustTerminate(1))
-    Requires(0 < i and i <= len(s))
-    Ensures(seq_sum(s.take(i)) == seq_sum(s.take(i - 1)) + s[i - 1])
-    ...
-
-def list_sum(a: List[int]) -> int:
-    ...
-    while i < len(a):
-        ...
-        seq_sum_step(ToSeq(a), i + 1)   # ghost statement in a regular loop
-```
-
-Write every lemma as `@Ghost`, whether or not its arguments are ghost — lemmas are proof material. A recursive lemma over a heap predicate measures by a pure size accessor; the measure must be provably positive, so give the accessor an `Ensures(Result() >= 1)`:
-
-```python
-@Ghost
-def lemma_length_pos(n: Node) -> None:
-    Requires(node_pred(n))
-    Requires(MustTerminate(length(n) + 1))
-    ...
-    if n.next is not None:
-        lemma_length_pos(n.next)   # length(n.next) < length(n)
-```
-
-## Built-in Ghost Types
-
-### Sequences (PSeq)
+#### Sequences (PSeq)
 
 Immutable mathematical sequences. The supported operations are:
 
@@ -458,7 +413,7 @@ x in s                            # Membership
 
 The varargs form `PSeq(x, y, ...)` is usable inline in any spec expression. For an empty sequence, avoid using the subscripted spelling `PSeq[int]()`, the verifier treats the result as an arbitrary value, not even empty. In a spec, express emptiness with `len(s) == 0`.
 
-### Sets (PSet)
+#### Sets (PSet)
 
 Immutable mathematical sets:
 
@@ -475,7 +430,7 @@ s - t                             # Difference
 
 There is no intersection operator, so you must express intersection with a quantifier or build it constructively. Same constructor rules as `PSeq`: the varargs form is usable inline in specs; for a known-empty set use `s: PSet[int] = PSet()`, never the subscripted `PSet[int]()`.
 
-### Multisets (PMultiset)
+#### Multisets (PMultiset)
 
 ```python
 from nagini_contracts.contracts import PMultiset
@@ -489,9 +444,50 @@ Same constructor rules as `PSeq`: the varargs form is usable inline in specs; fo
 
 There is no `.count` and no `x in m` for multisets, check membership with `m.num(x) > 0`.
 
+
+### Python containers
+
+Python lists, dicts and sets are heap objects. Accessing them requires permissions, which are expressed with built-in predicates:
+
+```python
+Requires(Acc(list_pred(xs)))          # full: read and mutate xs
+Requires(Acc(dict_pred(d), 1 / 2))    # a fraction: read only
+Requires(Acc(set_pred(s), 1 / 2))
+```
+As opposed to user-defined predicates, the built-in predicates do not require folding and unfolding.
+
+### Bridging between the two
+
+| Container | Pure view | Content |
+|-----------|-----------|---------|
+| `List[T]` | `ToSeq(xs)`: `PSeq[T]` | the elements, in order |
+| `Set[T]` | `ToSet(s)`: `PSet[T]` | the elements |
+| `Set[T]` | `ToSeq(s)`: `PSeq[T]` | the elements, without duplicates, in an unspecified but fixed order |
+| `Dict[K, V]` | `ToSet(d)`: `PSet[K]` | the keys |
+| `Dict[K, V]` | `ToSeq(d)`: `PSeq[K]` | the keys, as for a set; the values are `d[k]` |
+
+`ToMS()` is the multiset view of a `PSeq`.
+<!-- if knowledge -->
+### Membership
+
+`x in c` means different things per container. In a list or `PSeq` it holds when some element is `==` to `x`. In a set, dict or `PSet` it holds when `x` itself is an element (or key), by object identity. So `x in s` and `x in ToSet(s)` are the same fact, while for an arbitrary `int` `x in ToSeq(s)` does not give `x in s`: `x` may be a different object with the same value.
+
+### Mutators
+
+Modeled list mutators: `append`, `extend`, `insert`, `remove`, `reverse`, `copy`, `xs[i] = v`, `xs.pop()` (no-argument form only), `del xs[i]`, and `del xs[i:j]` (any bound may be omitted or negative; no step). For `xs.pop(i)`, capture `xs[i]` and write `del xs[i]` instead. Modeled dict mutators: `d[k] = v`, `d.pop(k)` (no-default form only), `del d[k]`. Modeled set mutators: `add`, `remove`, `clear`. `list.sort`, `list.clear`, and `list.count` are not modeled. `pop`/`del` require a non-empty list, an in-range index, or a present key — the same obligations as the equivalent read.
+
+Every mutator's contract entails the corresponding mutation on the pure view:
+
+```python
+xs.append(x)   # ToSeq(xs) == Old(ToSeq(xs)) + PSeq(x)
+s.add(x)       # ToSet(s) == Old(ToSet(s)) + PSet(x)
+d[k] = v       # ToSet(d) == Old(ToSet(d)) + PSet(k) and d[k] == v
+```
+<!-- end -->
+
 ## Built-in Functions with Verified Contracts
 
-Nagini ships verified contracts for many Python built-ins, usable directly in specs and pure functions. The table is the canonical list of the supported forms and the custom helpers they make redundant:
+Nagini ships verified contracts for many Python built-ins, usable directly in specs and pure functions:
 
 | Use this | Don't write |
 |----------|-------------|
@@ -501,6 +497,8 @@ Nagini ships verified contracts for many Python built-ins, usable directly in sp
 | `x in xs` (`List`, `PSeq`, `PSet`) | custom `contains(xs, x)`, existential over indices |
 | `xs[i]`, `xs.take(n)`, `xs.drop(n)`, `xs + ys` (`PSeq`) | manual sequence rebuild via recursion |
 
+
+<!-- if knowledge -->
 ## Integers
 
 ### Typing
@@ -538,8 +536,16 @@ def h(x: int, y: int) -> None:
 ```python
 MASK64 = 0xFFFFFFFFFFFFFFFF  # == 2**64 - 1; written as `2**64 - 1` it stays an opaque term
 ```
+<!-- end -->
 
-## Loop Invariants
+## Loops
+
+**Every loop must have invariants** that:
+1. Hold on entry to the loop
+2. Are preserved by each iteration
+3. Together with loop exit condition, imply proof obligations after the loop
+
+Inside the body, and after the loop, the invariant is all that is known about anything the loop touches. Permissions left out of the invariant are framed around the loop.
 
 ```python
 i = 0
@@ -552,16 +558,21 @@ while i < n:
     i += 1
 ```
 
-**Every loop must have invariants** that:
-1. Hold on entry to the loop
-2. Are preserved by each iteration
-3. Together with loop exit condition, imply the postcondition
 
+<!-- if knowledge -->
+### `for` loops
+If at all possible, prefer `while` loops over `for` loops. Write `while i < len(xs)` for a list, a range, or anything else that has an index, even where a `for` loop reads more naturally. Use a `for` loop only for a container without an index.
 
+`for x in c` walks `ToSeq(c)`. The loop needs at least 1/10 of the container's permission. It automatically keeps a fraction of it as an invariant. So you can read `c` in the body and the other invariants for free, and writing it is impossible because a portion of the permission is not available.
+
+`x` is assigned only when `c` is non-empty: guard invariants about it with `Implies(len(c) > 0, ...)`.
+
+`Previous(x)` is the `PSeq` of the values `x` took in the completed iterations. Be careful with it, use of `y in Previous(x)` inside a quantifier can make the verifier diverge.
+<!-- end -->
 
 ## Termination
 
-Nagini has two separate termination mechanisms. **They are not interchangeable.**
+Nagini has two separate termination mechanisms.
 
 | Context | Mechanism | Where it goes |
 |---------|-----------|---------------|
@@ -628,11 +639,10 @@ If a non-pure method is recursive but has no `Requires(MustTerminate(...))`, Nag
 
 Ghost code however must always terminate. A `@Ghost` method without `Requires(MustTerminate(...))` fails verification..
 
-## Assert and Assume
+## Assert
 
 ```python
 Assert(x > 0)          # Checked by verifier (fails if unprovable)
-Assume(x > 0)          # Assumed without proof (use sparingly)
 ```
 
 ## Let Bindings
@@ -642,28 +652,123 @@ Assume(x > 0)          # Assumed without proof (use sparingly)
 ```python
 Ensures(Let(x + 1, bool, lambda v: v > 0 and v < 100))
 ```
+<!-- if knowledge -->
+## Exception Contracts
 
-## Container Predicates
+### Exsures
 
-For working with Python lists as verified containers:
+`Exsures` can name `Exception` itself or any builtin `Exception` subclass (`ValueError`, `KeyError`, ...); builtins are modeled as opaque subclasses of `Exception`, raised via `raise ValueError` or `raise ValueError()` (a message argument is accepted but not modeled). To carry data on the exception, use a module-defined `Exception` subclass:
 
 ```python
-def process_list(items: List[int]) -> int:
-    Requires(Acc(list_pred(items)))
-    Requires(len(items) > 0)
-    Ensures(Acc(list_pred(items)))
+class DivisionError(Exception):
+    def __init__(self, code: int) -> None:
+        self.code = code
+        Ensures(Acc(self.code) and self.code == code)
 
-    ...
+def safe_divide(a: int, b: int) -> int:
+    Requires(True)
+    Ensures(b != 0 and Result() == a // b)
+    Exsures(DivisionError, b == 0)
+
+    if b == 0:
+        raise DivisionError(1)
+    return a // b
 ```
 
-The `list_pred` predicate represents ownership of a Python list and its elements. Dicts and sets use `dict_pred`/`set_pred` the same way.
+### RaisedException
 
-### Container Mutators
+In `Exsures`, use `RaisedException()` to refer to the exception object. `.args` is not modeled but you can use fields you define on your own exception class:
 
-Modeled list mutators: `append`, `extend`, `insert`, `remove`, `reverse`, `copy`, `xs[i] = v`, `xs.pop()` (no-argument form only), `del xs[i]`, and `del xs[i:j]` (any bound may be omitted or negative; no step). For `xs.pop(i)`, capture `xs[i]` and write `del xs[i]` instead. Modeled dict mutators: `d[k] = v`, `d.pop(k)` (no-default form only), `del d[k]`. Modeled set mutators: `add`, `remove`, `clear`. `list.sort`, `list.clear`, and `list.count` are not modeled. `pop`/`del` require a non-empty list, an in-range index, or a present key — the same obligations as the equivalent read.
+```python
+Exsures(DivisionError, Acc(RaisedException().code) and RaisedException().code == 1)
+```
 
 ## Global Variables
 
 A module-level name assigned exactly once is a constant: read it freely in any function. A reassigned global needs `Acc(<name>)` in contracts and a `global` declaration to rebind. A global list/dict/set is a constant binding whose *contents* still need the usual container permission — e.g. `Requires(Acc(list_pred(P1), 1/100))` and matching `Ensures`. Module-init facts do not flow into defs: restate what the body needs (`len(P1) == 3`, element values) in the precondition; module-level callers hold the permissions and facts after initialization.
 
+Reads of a global that is never reassigned need no contract permission:
 
+```python
+COUNTER: int = 0
+
+def get() -> int:
+    Ensures(Result() == COUNTER)
+    return COUNTER
+```
+
+Writes require `Acc(var)` in the contract and a `global` declaration placed before the contract lines. Return the permission via `Ensures` so the caller keeps it:
+
+```python
+def bump() -> None:
+    global COUNTER
+    Requires(Acc(COUNTER))
+    Ensures(Acc(COUNTER) and COUNTER == Old(COUNTER) + 1)
+    COUNTER = COUNTER + 1
+```
+Once any function in the module reassigns the global, even reads require `Acc(<name>)` in the contract — `get` as written above fails alongside a writer like `bump` below.
+
+For shared reads, split the permission into fractions and wrap it in a `@Predicate` (e.g. `Acc(a, 1/2)`), `Fold` it at module scope, and have functions require/ensure the predicate — same pattern as fractional field permissions.
+
+
+## Threads
+
+Import from `nagini_contracts.thread`:
+
+```python
+from nagini_contracts.thread import (
+    Thread, MayStart, Joinable, ThreadPost, getMethod, getArg, getOld, arg,
+)
+```
+
+### Lifecycle
+
+```python
+t = Thread(target=worker, args=(x, y))   # yields MayStart(t)
+t.start(worker)                          # consumes MayStart + worker's precondition,
+                                         # yields Joinable(t) + Acc(ThreadPost(t))
+t.join(worker)                           # consumes Acc(ThreadPost(t)), inhales worker's post
+```
+
+`start` yields `Joinable(t)` and `Acc(ThreadPost(t))` only if `worker`'s precondition includes a `MustTerminate(...)` obligation; without it the thread cannot be proven joinable.
+
+### Resources
+
+- `Joinable(t)` — bare boolean, not wrapped in `Acc(...)`. Holding `Acc(ThreadPost(t))` already implies `Joinable(t)`, so writing both is redundant.
+- `Acc(ThreadPost(t))` — permission to inhale the thread's postcondition on join. Fractional shares are allowed; joining with a fraction inhales that fraction of the postcondition.
+- `MayStart(t)` — one-shot permission to start a fresh thread.
+
+### Inspection helpers
+
+- `getMethod(t) == f` — the target is `f`.
+- `getArg(t, i)` — the `i`-th argument passed to `args=(...)`. If the target was a bound method `o.m`, the receiver `o` is `getArg(t, 0)` and the `args` tuple starts at index 1.
+- `getOld(t, arg(i).field)` — value of `arg(i).field` captured at `start()` time, for referring to `Old(...)` expressions in the target's postcondition.
+
+### Quantifying thread resources — `Joinable` conjunct bug
+
+Quantifying thread resources across a list of threads works, **except** `Joinable(threads[j])` cannot appear as a conjunct alongside anything else inside a `Forall`. This fails translation with `Not supported: Call`:
+
+```python
+# FAILS — Joinable as a conjunct
+Invariant(Forall(int, lambda j: (
+    Implies(0 <= j and j < i,
+            Joinable(threads[j])
+            and Acc(ThreadPost(threads[j]))),
+    [[threads[j]]]
+)))
+```
+
+Workaround: drop the redundant `Joinable(...)` — `Acc(ThreadPost(...))` already implies it:
+
+```python
+# OK
+Invariant(Forall(int, lambda j: (
+    Implies(0 <= j and j < i,
+            Acc(ThreadPost(threads[j]))
+            and getMethod(threads[j]) == worker),
+    [[threads[j]]]
+)))
+```
+
+`Joinable(threads[j])` **alone** as the sole body of a `Forall` also works — the bug is specifically its use in a conjunction.
+<!-- end -->
