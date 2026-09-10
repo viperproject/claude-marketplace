@@ -86,7 +86,7 @@ You should ensure for each method/function:
 - **Permissions returned**: all permissions acquired in preconditions must be returned in postconditions (unless deliberately consumed)
 - **Branch coverage**: all branches of conditionals should be covered by the postcondition, not just the happy path
 - **Uncallable preconditions**: avoid preconditions that are so strong (or even unfeasible) that no call site could satisfy them
-- **Triggers on quantified properties**: every `Forall` in a contract needs a well-chosen trigger.
+- **Avoid bare quantifiers**: a `Forall` written directly into a pre- or postcondition joins the proof context of every caller and of every check that mentions the contract. Prefer hiding the quantifier in a predicate or pure function.
 
 ### Frame Conditions
 
@@ -95,7 +95,7 @@ Every location the contract takes permission to is havocked by a call, even loca
 - **Field**: `Ensures(self.f == Old(self.f))`
 - **Reference identity**: a reference-typed field also loses *which object* it points to — state `Ensures(self.child is Old(self.child))`, not just value equality
 - **Container contents**: preserving permissions preserves nothing about the values (see Old Values in the `nagini-language` reference). For example, in addition to `Acc(list_pred(self.xs))` you must also state `Ensures(len(self.xs) == Old(len(self.xs)) and ToSeq(self.xs) == Old(ToSeq(self.xs)))`.
-- **Predicate-owned state**: preserve the pure representation, e.g. `Ensures(sl_seq(self) == Old(sl_seq(self)))`
+- **Predicate-owned state**: preserve the pure representation, e.g. `Ensures(sl_seq(self) == Old(sl_seq(self)))`.
 
 Note that if only a fraction of a location is provided in the precondition, then framing guarantees that the values remain the same, so no `Old` equality is needed. However, facts about these values may not be immediately available to the verifier in the postcondition, so they may require restating as a postcondition. For example, if a postcondition calls a pure function that requires some condition fractionally-held state (e.g. a bound on the length), you may have to restate the condition as an explicit postcondition.
 

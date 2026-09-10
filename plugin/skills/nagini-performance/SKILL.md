@@ -5,14 +5,13 @@ description: Verification performance for Nagini. The cost model, healthy-runtim
 
 # Verification Performance
 
-Verification time ≈ number of symbolic execution paths × cost per SMT query. Query cost is dominated by the proof context: every axiom, pure-function body, path condition, and heap chunk in scope alongside the goal. Slowness is too many paths, too much context, or both; the two multiply.
-
+Verification time ≈ number of symbolic execution paths × cost per SMT query. Query cost is dominated by the proof context: every axiom, pure-function body, path condition, quantifier, and heap chunk in scope alongside the goal. Slowness is too many paths, too much context, or both; the two multiply.
 
 Contract and vocabulary shapes determine this cost before any proof is written, and proof effort cannot recover a cheap shape from an expensive one. The fix catalog therefore serves both phases:
 - at design time, pick the cheap shape;
 - at repair time, diagnose which resource is exhausted (Diagnosis)
 <!-- if timeouts -->
-- spend budget only within the allowed probes (Budget policy)
+- spend budget only within the allowed probes (Raising budgets)
 <!-- end -->
 - restructure toward the cheap shape (the catalog).
 
@@ -24,39 +23,25 @@ The vocabulary of a project is the biggest lever for performance. The `@Contract
 
 ## Diagnosis
 
-Three checks route a slow member to the right fix; run them in order.
-
 <!-- if errors -->
-**1. Encode or prove?** Every verification result carries `timings`: seconds spent in each pipeline phase (`typecheck`, `translate`, `chop`, `verify`). If `translate` or `chop` dominates, the program is pathological to *encode*, not to prove — shrink or split the member being encoded. Continue only when `verify` dominates.
-<!-- else -->
-**1. Encode or prove?** Compare the `duration` of a `translate_only: true` run with that of the full verification. If translation dominates, the program is pathological to *encode*, not to prove — shrink or split the member being encoded. Continue only when verification dominates.
+*Encoding or proving?* `timings` gives the seconds per pipeline phase. If `translate` or `chop` dominates `verify`, the cause is encoding: shrink or split the member.
 <!-- end -->
 
-**2. Fact-starved or budget-bound?** A stepping-stone `Assert` that supplies a fact the solver was missing makes the checks after it cheaper — that is the fix for an under-instantiated goal
-<!-- if errors -->
-(the `(incomplete quantifiers)` diagnosis in the handling-verification-errors skill).
-<!-- else -->
-(the handling-verification-errors skill's probe-assert strategy).
-<!-- end -->
-But on a check that is budget-bound and making progress rather than fact-starved, each added assert is one more query against the same budget: there, cut context or paths instead of adding proof steps.
-<!-- if errors -->
-A failing diagnostic's `debug` payload tells the two apart — `reasonUnknown`, and whether `rlimitDelta` sits at the cap.
-<!-- else -->
-Probing tells the two apart: a fact-starved check closes as soon as the missing fact is asserted, while a budget-bound check keeps getting slower as the proof context grows.
+*Separating paths from context*:
+<!-- if timeouts -->
+- Whole-run vs. assert timeout: If the assert timeout is set low, then a `TimeoutOccurred` for the whole-run means the problem is almost certainly paths, whereas a single check `canceled` means one expensive query, so context or instantiation.
 <!-- end -->
 
-**3. Which bottleneck class?** Two signals identify the class, which picks the catalog family:
+<!-- if errors -->
+- `reasonUnknown` `(incomplete quantifiers)` means the query did not close for lack of a fact: a debugging problem, not a performance one.
+<!-- end -->
+- You can also probe this with two `viper_args` (remember to flush the cache):
+   - `--moreJoins 1` (join branches after impure conditionals) passes now → paths;
+   - `--exhaleMode 0` (greedy heap reasoning) passes now → heap context.
+   - neither passes → unclear.
 
 <!-- if timeouts -->
-- A `TimeoutOccurred` for the whole-run `--timeout` means the global budget expired while every individual check stayed within its per-check budget. With a low `assertTimeout` that means the member fans out too many sub-budget queries (a path per impure conditional, every `Assert` re-proved on each) → path explosion; cut paths.
-<!-- else -->
-- A `TimeoutOccurred` for the whole-run `--timeout` usually means the member fans out too many queries (a path per impure conditional, every `Assert` re-proved on each) → path explosion; cut paths.
-<!-- end -->
-- A member that verifies only under a `viper_args` flag has identified its bottleneck: `--moreJoins 1` (join branches after impure conditionals) passes now → path explosion; cut paths. `--exhaleMode 0` (greedy heap reasoning; incomplete under disjunctive aliasing, so a *new* error under it proves nothing) passes now → heap-exhale cost; shrink the permission footprint and keep predicates folded.
-
-<!-- if timeouts -->
-## Budget policy
-
+## Raising budgets
 Raised budgets are probes, not fixes. On a whole-run timeout, a single 2x `--timeout` re-run is a fair probe; beyond 2x more budget rarely helps — decompose rather than re-budget. For a single budget-bound check (`canceled`), up to 10x the default `assertTimeout` is an acceptable fix if the check closes within it; beyond 10x, restructure rather than re-budget.
 
 Every escalation is temporary: after the change it motivated, turn the budget back down and re-verify at the standard limits. A member that can only iterate under escalated budgets will drag the rest of the verification down permanently. Apply the fix catalog until the standard budgets carry it again.
@@ -64,11 +49,10 @@ Every escalation is temporary: after the change it motivated, turn the budget ba
 
 ## The fix catalog
 
-Match the family to the diagnosis: fact-starved goals want a well-placed fact or trigger (Triggers), path explosion wants fewer paths (Cut symbolic paths), and everything budget-bound on context wants a smaller context (Shrink the proof context).
-
 ### Shrink the proof context
 
 - **Hide quantifiers in predicates.** Every `Forall` will add to the proof context. Wrap it in a predicate to remove it from the context, especially in contracts or invariants. Unfold only when necessary, possibly in a targeted lemma to avoid bloating the proof context. Note that this does not only hold for permissions, any quantifier can be put in a predicate.
+- **Quantified proof steps persist.** An `Assert(Forall(...))` or a quantified invariant stay in the context for the rest of the method, and every later check may suffer from it. Wrap properties in predicates and opaque functions, reveal the quantifiers only in loop bodies or in separate lemmas. 
 - **Heap facts behind one predicate, exposed via accessors.** Keep a structure's permissions and invariants in a single predicate, and read them through `@Pure` accessors that take the predicate and unfold it. Phrase contracts as relations over those accessors (`parent(self, k) == Old(parent(self, k))`) rather than `Forall`s over `xs[k].field`: the predicate is one chunk, while a quantified heap access is re-justified on every path of every check mentioning the contract.
 - **Plain `@Pure` bodies are global axioms; use `@Opaque` to hide them.** Every plain `@Pure` body compiles to a definitional axiom (`forall args: f(args) == body`) that E-matching chases automatically wherever the function appears — wrapping a heavy condition in a plain `@Pure` function shrinks nothing. Only `@Predicate` bodies (opaque until unfolded) and `@Opaque` `@Pure` functions actually hide a definition. Mark heavy, widely-used pure definitions `@Opaque`, put what callers routinely need in the `Ensures`, and `Reveal` at the few sites that need the definition itself. Ideally, only call `Reveal` in controlled limited environments like inside a targeted lemma, to avoid introducing the expensive body into every caller's proof context.
 - **Keep predicates folded.** In loop invariants, hold the predicate folded; `Unfold`/`Fold` inside the body, `Unfolding(...)` for value reads. An unfolded predicate costs as much as no predicate.
@@ -78,6 +62,14 @@ Match the family to the diagnosis: fact-starved goals want a well-placed fact or
 - **Move proof steps into a lemma.** A lemma's proof context is exactly its precondition, and its facts reach the caller only through its postcondition.
 - **Split large methods**; extract inner loops into helper methods with contracts.
 
+#### Triggers
+
+Every instantiation adds terms to every later query; these entries keep quantifiers from instantiating more than the goal needs. A quantifier that instantiates too little is a starved check — the handling-verification-errors skill's problem, not this one.
+
+- Give every `Forall` an explicit trigger: the most restrictive terms that still fire (see Trigger rules in the `nagini-language` reference).
+- Collapse nested `Forall` over independent domains into `Forall2`/.../`Forall6` with a joint trigger.
+- A matching loop — instantiation produces a new term matching the same trigger — consumes any budget; fix the trigger, more budget will not help.
+
 ### Cut symbolic paths
 
 - **Split branchy predicates.** A predicate body with N `Implies`-guarded conjuncts forks 2^N symbolic paths at every unfold site. Move each guarded part into its own predicate, unfolded on demand.
@@ -85,16 +77,7 @@ Match the family to the diagnosis: fact-starved goals want a well-placed fact or
 - **One lemma per disjunct.** Split a lemma precondition of the form `A or B` into one lemma per disjunct, selected at the call site by `if`. A disjunctive goal gives the solver no branch to take; each disjunct on its own path is a one-step goal.
 - **Replace `Exists()` with an explicit witness** — a witness variable or a pure function returning it (see the `nagini-language` limitations reference).
 
-### Triggers
-
-- Give every `Forall` an explicit trigger: the most restrictive terms that still fire (see Trigger rules in the `nagini-language` reference).
-- Collapse nested `Forall` over independent domains into `Forall2`/.../`Forall6` with a joint trigger.
-- When two consumers phrase a quantified fact's terms differently, give one `Assert` both trigger sets as alternatives.
-- Establish a quantified fact before the branch that consumes it, not only where the invariant is re-established at the end of the loop body.
-- A matching loop — instantiation produces a new term matching the same trigger — consumes any budget; fix the trigger, more budget will not help.
-
 ## While iterating
 
 - **Measure every change.** After a performance change, compare the duration and revert it if it did not win.
-
-- **Termination last.** Comment out `Decreases()`/`MustTerminate` measures and verify partial correctness first; restore them once the functional proof passes. Every run otherwise re-pays the termination obligations, and their failures mix into the functional signal.
+- **Termination last.** Comment out `Decreases()`/`MustTerminate` measures and verify partial correctness first; restore them once the functional proof passes.
