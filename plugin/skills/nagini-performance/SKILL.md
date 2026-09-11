@@ -35,7 +35,7 @@ The vocabulary of a project is the biggest lever for performance. The `@Contract
 <!-- if errors -->
 - `reasonUnknown` `(incomplete quantifiers)` means the query did not close for lack of a fact: a debugging problem, not a performance one.
 <!-- end -->
-- You can also probe this with two `viper_args` (remember to flush the cache):
+- You can also probe this with two `viper_args` (add `--disableCaching` so the cached result is not served back):
    - `--moreJoins 1` (join branches after impure conditionals) passes now → paths;
    - `--exhaleMode 0` (greedy heap reasoning) passes now → heap context.
    - neither passes → unclear.

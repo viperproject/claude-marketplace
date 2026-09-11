@@ -36,8 +36,6 @@ Once a pure representation is available, most key functional properties (e.g. so
 
 Nagini ships verified contracts for many Python built-ins (`abs`, `max`/`min`, `len`, `x in xs`, `PSeq` operations). Use them directly in specs — do not write custom `@Pure` helpers that duplicate them (see the `nagini-language` skill: Built-in Functions with Verified Contracts).
 
-Only write a custom pure function when no built-in covers the operation.
-
 #### Opaque heavy definitions
 
 When callers mostly need a few consequences of a pure function rather than the definition, mark it `@Opaque` and state those consequences in its `Ensures` (see Opaque pure functions in the `nagini-language` reference). The `Ensures` is then the whole caller-facing interface — design it to carry what contracts and invariants routinely need.

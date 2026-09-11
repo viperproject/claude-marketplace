@@ -24,7 +24,7 @@ The reverse does not hold for performance limitations. An entry that says "times
   **Workaround**: Keep aggregates constructive: build collections operation by operation, or track the count in its own variable updated alongside every mutation. Keep cardinality out of `Decreases` measures.
 
 - **Limitation**: Bitwise operators on ints (`&`, `|`, `^`, `<<`, `>>`) will cause verification time to explode. Every application converts its operands from the solver's integer theory into a fixed-width bitvector, applies the operation there, and converts the result back; the solver then has to relate facts across the two theories, which it does poorly. A value known only through equalities (a symbolic argument) is much worse than a literal.
-  **Workaround**: Never user bitwise operations, instead, express using integer arithmetic with constant divisors (`x & 1` -> `x % 2`, `x >> k` -> `x // 2**k`, `x << k` -> `x * 2**k`). This stays in one theory and is linear, so the solver evaluates it instantly. This is especially crucial for spec vocabulary (pure step functions, predicates, contracts).
+  **Workaround**: Never use bitwise operations, instead, express using integer arithmetic with constant divisors (`x & 1` -> `x % 2`, `x >> k` -> `x // 2**k`, `x << k` -> `x * 2**k`). This stays in one theory and is linear, so the solver evaluates it instantly. This is especially crucial for spec vocabulary (pure step functions, predicates, contracts).
 
 - **Limitation**: String support beyond the basics (literals, `+`, `len()`, equality). String methods, formatting, and slicing are largely unsupported.
   **Workaround**: Use lists of integers to represent strings when string reasoning is needed.

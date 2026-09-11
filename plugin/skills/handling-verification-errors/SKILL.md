@@ -5,10 +5,10 @@ description: Nagini debugging and error handling reference. Provides strategies 
 
 # Guiding Principle
 
-- **Never** make assumptions about the cause of a verification error without evidence. Instead, always use the systematic techniques described here to gather information and isolate the true cause to fix the underlying issue.
+- Never make assumptions about the cause of a verification error without evidence. Use the systematic techniques described here to gather information and isolate the true cause to fix the underlying issue.
 - When fixing, add only what the evidence shows is missing: each addition responds to a located missing step, and each new failure gets the same diagnostic read.
-- **Never** pre-plan a full proof ("this will need induction, three cases, two helper lemmas") — that leads to proof bloat. Let the verifier fail first, then react to what it actually needs.
-- **Never** weaken or delete a contract just to make verification pass; surface the mismatch instead.
+- Never pre-plan a full proof ("this will need induction, three cases, two helper lemmas") — that leads to proof bloat. Let the verifier fail first, then react to what it actually needs.
+- Never weaken or delete a contract just to make verification pass; surface the mismatch instead.
 
 The verifier is reasonably powerful: it should practically always be possible to verify code with the correct specifications, so a correct-looking specification that fails usually means a missing intermediate assertion or lemma, not a limitation. The known limitations are listed in the `nagini-language` skill's limitations reference.
 
@@ -123,7 +123,7 @@ When a fold fails, assert each component of the predicate body separately (witho
 <!-- if errors -->
 ## Interrogate the verifier
 
-Never guess the reason for a failure — extract it. The failing diagnostic carries evidence (the location, the `message`, the `reason`, and the `debug` payload), and the verify tools produce more of it on demand: re-verification with different flags or budgets, the untruncated archive, the Viper encoding. Use them actively: every question of the form "what did the verifier actually see or do here?" has a tool answer.
+The failing diagnostic carries evidence (the location, the `message`, the `reason`, and the `debug` payload), and the verify tools produce more of it on demand: re-verification with different flags or budgets, the untruncated archive, the Viper encoding. Use them actively: every question of the form "what did the verifier actually see or do here?" has a tool answer.
 
 Often, it is useful to pass `include_viper: true` to any verify tool to get the translated Viper program as `viperProgram`. How an operator, builtin, or contract clause is actually encoded determines what the solver can possibly derive about it. Even small files translate to hundreds of lines, so ideally request it on a reduced snippet, not the full module.
 
@@ -245,7 +245,7 @@ There are three possible outcomes:
 Promotion is mostly mechanical: the candidate is already a verified, lemma-shaped function. This step just gives it a permanent home.
 
 **File conventions.** Lemmas live in a separate file `lemma_<lemma_name>.py` (same directory as the source) and are imported into the original file. If the lemma needs predicates or pure functions defined in the source file, extract those shared definitions into a `<source_file_name>_definitions.py` file first (to avoid circular imports) and have both files import from it. Check whether a `_definitions.py` file already exists before creating a new one.
-**Contract interface.** Designing the lemma contract correctly is crucial to actually achieving the desired verification goal and performance benefits. Phrase the contract so that instantiation lands on the caller's exact goal terms. Often it is better to take those expressions as parameters instead of baking their values in as constants: a conclusion over a constant leaves the caller to rewrite its term into that shape in its own, expensive context. The same principle cuts the other way: every heavy term the contract mentions must be proven or is re-imported at each call site.
+**Contract interface.** Phrase the contract so that instantiation lands on the caller's exact goal terms. Often it is better to take those expressions as parameters instead of baking their values in as constants: a conclusion over a constant leaves the caller to rewrite its term into that shape in its own, expensive context. The same principle cuts the other way: every heavy term the contract mentions must be proven or is re-imported at each call site.
 
 **Procedure.**
 1. Rename the candidate `<method>_repro.py` to `lemma_<lemma_name>.py`. 
@@ -277,7 +277,7 @@ Assert(digits(1234) == PSeq(4, 3, 2, 1))
 Why it works: the body is unrolled once, this contains the recursive application, which triggers the quantifier again, which repeats the process one unfolding deeper. Caution: unconstrained function unrolling can lead to performance problems, in particular the solver will diverge if the such a function is applied to unconstrained symbolic arguments.
 
 ## Dead ends
-Never give up until you have tried all of the strategies above. If you have tried all the strategies above and are not longer making progress on understanding the failure, you can report a dead end. 
+Report a dead end only once the strategies above are exhausted and no longer produce new evidence about the failure.
 
 <!-- if errors -->
 Demonstrate it with a minimal snippet pair: the minimal failing shape and all the collected evidence about what fails on which layer (encoding, SMT) and why.

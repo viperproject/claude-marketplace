@@ -49,6 +49,8 @@ def method_name(param: Type) -> ReturnType:
     # ... body ...
 ```
 
+The contracts form one block at the start of the body, in the order `Requires`, `Decreases`, `Ensures`, `Exsures`.
+
 Multiple `Requires`/`Ensures` are conjoined:
 
 ```python
@@ -77,7 +79,7 @@ def swap(a: Cell, b: Cell) -> None:
 
 #### Constructors
 
-In `__init__`, write the field assignments before the `Ensures` clauses: mypy infers each field's type from its first assignment, so a contract referencing `self.field` above it fails with `Cannot determine type [has-type]`.
+In `__init__`, write the field assignments before the `Ensures` clauses: mypy infers each field's type from its first assignment, so a contract referencing `self.field` above it fails. `Requires` and `Exsures` stay at the top; only the `Ensures` block may trail.
 
 ```python
 class ListNode:
