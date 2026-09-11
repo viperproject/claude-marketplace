@@ -301,7 +301,7 @@ A loop that swaps `heap[pos]` and `heap[parent]` fails its invariant with
   "failedAssertionPretty": "PMultiset___eq__((_, (_, _)),
       __toMS(PSeq___sil_seq__(_, heap)), Old(__toMS(...)))",
   "reasonUnknown": "(incomplete quantifiers)",
-  "rlimitDelta": 4500000,
+  "rlimitDelta": 610000,
   "branchConditions": [],
   "assumptions": ["issubtype(typeof(heap), list(int))",
                    "PSeq___update__(_, sq, pos, tmp) == ..."],
@@ -311,7 +311,7 @@ A loop that swaps `heap[pos]` and `heap[parent]` fails its invariant with
 ```
 
 Read it in this order:
-1. `reasonUnknown` is `(incomplete quantifiers)` and `rlimitDelta` sits exactly at the budget (500ms × 9000) — the instantiation search was still churning when the cap hit. The skill's `(incomplete quantifiers)` strategy applies: do **not** re-run with a bigger budget.
+1. `reasonUnknown` is `(incomplete quantifiers)` and `rlimitDelta` sits far below the budget (500ms × 9000 = 4,500,000) — the solver gave up on its own with the goal still open; it did not run out of budget. The skill's `(incomplete quantifiers)` strategy applies: do **not** re-run with a bigger budget.
 2. The goal (pretty form) is a multiset equality over `__toMS(...)` of the sequence; the `assumptions` list has facts about `PSeq___update__` (the element writes) but **nothing connecting a sequence update to its `__toMS` image** — the bridge the goal needs is absent, not slow.
 3. `state.store` shows `heap` still bound to the same version (`heap@13@07`) on both sides — so the failure is not a havocked variable; it really is the missing seq-to-multiset bridging fact.
 

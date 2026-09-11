@@ -35,6 +35,9 @@ Optional parameters on all verify tools:
 <!-- if timeouts -->
 In particular, this includes a whole-run `--timeout` and per-assert SMT budget `--assertTimeout`.
 <!-- end -->
+<!-- if errors -->
+SMT-state collection (`--smtStateOnError`) is among them: every verification failure already carries its `debug` payload.
+<!-- end -->
 
 <!-- if errors -->
 - `counterexample: true` — include concrete failing variable assignments in each diagnostic.
@@ -44,12 +47,15 @@ In particular, this includes a whole-run `--timeout` and per-assert SMT budget `
 
 Result shape:
 ```json
-{"success": bool, "translationFailed": bool, "duration": float,
- "diagnostics": [{"file": str, "startLine": int, "startCol": int,
-                  "code": str, "message": str, "reason": str,
-                  "reasonPosition": [int, int], "counterexample": str, "branchConditions": [str], "vias": []}]}
+{"success": bool, "translationFailed": bool, "cancelled": bool, "crashed": bool, "duration": float,
+ "diagnostics": [{"file": str, "startLine": int, "startCol": int, "endLine": int, "endCol": int,
+                  "code": str, "message": str, "reason": str, "reasonPosition": [int, int],
+                  "counterexample": str, "branchConditions": [str], "vias": []}]}
 ```
-Pass/fail is the `success` field. `translationFailed: true` marks syntax/type/translation errors as opposed to verification failures. `startLine` is 1-indexed. `reasonPosition` is the line and column of the clause the `reason` names, such as the failing postcondition; `[0, 0]` when there is none.
+Pass/fail is the `success` field. `translationFailed: true` marks syntax/type/translation errors as opposed to verification failures. `cancelled: true` means the run was stopped by the `cancel` tool or by the whole-run budget; a whole-run timeout is always reported as a `TimeoutOccurred` diagnostic. `crashed: true` means the backend died with an exception, reported in a `verifier.crashed` diagnostic; an identical re-run usually crashes again. `startLine` is 1-indexed. `reasonPosition` is the line and column of the clause the `reason` names, such as the failing postcondition; `[0, 0]` when there is none. `branchConditions` are the branch decisions, as Python conditions with their positions, on the path the failure was found on. `vias` lists intermediate positions the error was routed through.
+<!-- if errors -->
+With diagnostics on, the result also carries `timings` (seconds per pipeline phase: typecheck, translate, chop, verify) and `recordedAt` (this run's archive directory), and every verification failure a `debug` payload. `include_viper` adds `viperProgram`.
+<!-- end -->
 <!-- else -->
 Verification runs through the `nagini` MCP server.
 
@@ -61,9 +67,12 @@ Verification runs through the `nagini` MCP server.
 <!-- if knowledge -->
 
 <!-- if timeouts -->
-The result cache keys entries on the file content and backend; verifier flags are not part of the key. Editing a file therefore changes its cache key — after an edit, re-verifying needs no flush. Flush only when re-running *unchanged* content under different `viper_args` (e.g. a raised `--assertTimeout`), where the old flags' result would be served back; such hits carry a `[note: result served from the verification cache …]` marker, and `--disableCaching` on the probe is a flush-free alternative. `flush_cache()` clears the whole cache for every agent sharing the server, so a spurious flush makes everyone re-pay verification that a warm cache would have served.
+The result cache keys entries on the file content and backend; verifier flags are not part of the key. Editing a file therefore changes its cache key — after an edit, re-verifying needs no flush. Flush only when re-running *unchanged* content under different `viper_args` (e.g. a raised `--assertTimeout`), where the old flags' result would be served back; `--disableCaching` on the probe is a flush-free alternative. `flush_cache()` clears the whole cache for every agent sharing the server, so a spurious flush makes everyone re-pay verification that a warm cache would have served.
 <!-- else -->
-The result cache keys entries on the file content and backend; verifier flags are not part of the key. Editing a file therefore changes its cache key — after an edit, re-verifying needs no flush. Flush only when re-running *unchanged* content under different `viper_args`, where the old flags' result would be served back; such hits carry a `[note: result served from the verification cache …]` marker, and `--disableCaching` on the probe is a flush-free alternative. `flush_cache()` clears the whole cache for every agent sharing the server, so a spurious flush makes everyone re-pay verification that a warm cache would have served.
+The result cache keys entries on the file content and backend; verifier flags are not part of the key. Editing a file therefore changes its cache key — after an edit, re-verifying needs no flush. Flush only when re-running *unchanged* content under different `viper_args`, where the old flags' result would be served back; `--disableCaching` on the probe is a flush-free alternative. `flush_cache()` clears the whole cache for every agent sharing the server, so a spurious flush makes everyone re-pay verification that a warm cache would have served.
+<!-- end -->
+<!-- if errors -->
+A failure served from the cache carries a `[note: result served from the verification cache …]` marker and no `debug` payload.
 <!-- end -->
 
 Only *methods* are cached: pure functions and predicates re-pay their full verification cost on every call.
