@@ -25,11 +25,20 @@ The vocabulary of a project is the biggest lever for performance. The `@Contract
 
 <!-- if errors -->
 *Encoding or proving?* `timings` gives the seconds per pipeline phase. If `translate` or `chop` dominates `verify`, the cause is encoding: shrink or split the member.
+
+*Whole-run Timeouts* A `TimeoutOccurred` diagnostic's `debug` payload carries `inFlight` (member, source line, kind and running time of each unfinished check), `slowestChecks` (the longest completed checks with their line, answer, reason and instantiation count) and `memberCheckTotals` (checks and milliseconds per member). One long in-flight or slow check is a single expensive query at that line: context or instantiation. Many short checks adding up in `memberCheckTotals` is a path explosion. Confirm with an `Assert(False)` before the named line: the run should then complete quickly.
+<!-- else -->
+*Whole-run Timeouts* Localize the cause of `TimeoutOccurred` by commenting out many proof obligations and adding them back until the run diverges again, or inserting `Assert(False)` before a suspect obligation. Everything after it verifies vacuously, so walking it down the body and diffing the durations shows which region the time belongs to.
 <!-- end -->
 
 *Separating paths from context*:
 <!-- if timeouts -->
-- Whole-run vs. assert timeout: If the assert timeout is set low, then a `TimeoutOccurred` for the whole-run means the problem is almost certainly paths, whereas a single check `canceled` means one expensive query, so context or instantiation.
+- Whole-run vs. assert timeout: If the assert timeout is set low, then a `TimeoutOccurred` for the whole run means the problem is almost certainly paths, whereas a single budget-bound check means one expensive query, so context or instantiation.
+<!-- if errors -->
+- A budget-bound check shows `reasonUnknown` `canceled` or `unknown` with `rlimitDelta` at the cap.
+<!-- else -->
+- A located error that disappears under a raised `--assertTimeout` probe was a budget-bound check.
+<!-- end -->
 <!-- end -->
 
 <!-- if errors -->
@@ -42,7 +51,7 @@ The vocabulary of a project is the biggest lever for performance. The `@Contract
 
 <!-- if timeouts -->
 ## Raising budgets
-Raised budgets are probes, not fixes. On a whole-run timeout, a single 2x `--timeout` re-run is a fair probe; beyond 2x more budget rarely helps — decompose rather than re-budget. For a single budget-bound check (`canceled`), up to 10x the default `assertTimeout` is an acceptable fix if the check closes within it; beyond 10x, restructure rather than re-budget.
+Raised budgets are probes, not fixes. On a whole-run timeout, a single 2x `--timeout` re-run is a fair probe; beyond 2x more budget rarely helps — decompose rather than re-budget. For a single budget-bound check, up to 10x the default `assertTimeout` is an acceptable fix if the check closes within it; beyond 10x, restructure rather than re-budget.
 
 Every escalation is temporary: after the change it motivated, turn the budget back down and re-verify at the standard limits. A member that can only iterate under escalated budgets will drag the rest of the verification down permanently. Apply the fix catalog until the standard budgets carry it again.
 <!-- end -->

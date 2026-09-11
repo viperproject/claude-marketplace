@@ -5,7 +5,7 @@ description: Nagini debugging and error handling reference. Provides strategies 
 
 # Guiding Principle
 
-- Never make assumptions about the cause of a verification error without evidence. Use the systematic techniques described here to gather information and isolate the true cause to fix the underlying issue.
+- Never interpret a failure you do not understand. Use the systematic techniques described here to gather information and understand the true cause. A guess based on insufficient evidence will often be wrong and lead to incorrect conclusions.
 - When fixing, add only what the evidence shows is missing: each addition responds to a located missing step, and each new failure gets the same diagnostic read.
 - Never pre-plan a full proof ("this will need induction, three cases, two helper lemmas") — that leads to proof bloat. Let the verifier fail first, then react to what it actually needs.
 - Never weaken or delete a contract just to make verification pass; surface the mismatch instead.
@@ -34,7 +34,7 @@ First reduce the error to a single failing assertion:
 
 **For branches/multiple returns**: Do *not* assume which branch is the problem. Add asserts to each branch / before each return to find out which one fails.
 
-**For a whole-run timeout** (`TimeoutOccurred`, no position, no diagnostics): localize manually by commenting out proof obligations until the run completes, or inserting `Assert(False)` before a suspect obligation to confirm the run reaches it. Everything after `Assert(False)` verifies vacuously, so walking it down the body and diffing the durations shows which region the time belongs to. A whole-run timeout means you have a performance problem to solve: switch to the `nagini-performance` skill and address it before resuming ordinary fix iteration.
+A whole-run timeout (`TimeoutOccurred`) is a performance problem, not a missing fact: switch to the `nagini-performance` skill and address it before resuming ordinary fix iteration.
 
 **Separate conjunctions**: If the error occurs for a conjunction of properties, determine which clause is failing:
 - Multiple postconditions/invariants: assert each individually
@@ -125,41 +125,48 @@ When a fold fails, assert each component of the predicate body separately (witho
 
 The failing diagnostic carries evidence (the location, the `message`, the `reason`, and the `debug` payload), and the verify tools produce more of it on demand: re-verification with different flags or budgets, the untruncated archive, the Viper encoding. Use them actively: every question of the form "what did the verifier actually see or do here?" has a tool answer.
 
-Often, it is useful to pass `include_viper: true` to any verify tool to get the translated Viper program as `viperProgram`. How an operator, builtin, or contract clause is actually encoded determines what the solver can possibly derive about it. Even small files translate to hundreds of lines, so ideally request it on a reduced snippet, not the full module.
-
-If a failing diagnostic has no `debug` field, the server was launched without SMT-state collection; pass the required `viper_args` (`--smtStateOnError` and `--reportReasonUnknown`) yourself.
+How an operator, builtin, or contract clause is actually encoded determines what the solver can possibly derive about it. A failing diagnostic's `debug.viperExcerpt` carries the Viper text of the member that failed and of the quantified functions and predicates it mentions. `include_viper: true` on any verify tool returns the whole translated program as `viperProgram` when the excerpt is not enough.
 
 Each failing diagnostic's `debug` object contains the symbolic state at the failure, expressed in the verifier's internal term language:
 
-| Field | Content | Use it to |
-|---|---|---|
-| `failedAssertion` | The exact goal term the solver could not prove | See the obligation as the solver sees it (after encoding), not as you wrote it |
-| `failedAssertionPretty` | The same goal with `@line@col` suffixes stripped and `_checkDefined` shims unwrapped | Read the goal quickly; fall back to the raw term when versions matter |
-| `reasonUnknown` | Why the solver returned unknown (see table below) | **Choose the fix strategy** |
+| Field | Content |
+|---|---|
+| `failedAssertion` | The exact goal term the solver could not prove, as encoded, not as you wrote it |
+| `failedAssertionPretty` | The same goal with `@line@col` suffixes stripped and `_checkDefined` shims unwrapped; the raw term is for when versions matter |
+| `reasonUnknown` | Why the solver returned unknown. This is the main diagnosis lever |
+| `quantifiers` | The quantified assumptions in scope, each with its `triggers`, `vars` and `body` |
+| `viperExcerpt` | The Viper text of the failing member (`member`, `kind`, `viper`) and of the quantified functions and predicates it mentions (`quantified`) |
+| `failingCheck` | The prover query that produced the failure: `kind` (`assert` is a proof obligation, `check` a heap query), `answer`, wall `ms`, `budgetMs` and `instantiations`. Absent when no query was run, such as a chunk missing outright |
 <!-- if timeouts -->
-| `rlimitDelta` | Prover resources the failing check consumed, in Z3 rlimit units (the budget is `assertTimeout` ms × 9000) | A delta at the budget means the cap bound the check; a delta well below it means the solver stopped on its own |
+| `rlimitDelta` | Prover resources the failing check consumed, in Z3 rlimit units; the budget is `assertTimeout` ms × 9000 |
 <!-- else -->
-| `rlimitDelta` | Prover resources the failing check consumed, in Z3 rlimit units | Compare across probes: a delta that grows with the proof context means the check is budget-bound; a small one means the solver stopped on its own |
+| `rlimitDelta` | Prover resources the failing check consumed, in Z3 rlimit units. Compared across probes, a delta that grows with the proof context is a budget-bound check; a small one means the solver stopped on its own |
 <!-- end -->
-| `assumptions` | Path-condition terms in scope at the failure, pre-filtered to those sharing a symbol with `failedAssertion` (an `omitted` marker counts the rest) | Scan for gross absences and anomalies. To test whether a specific fact is available, probe it with `Assert` — presence in this list is neither necessary nor sufficient for derivability |
-| `branchConditions` | The branch decisions leading to the failing path | Identify which control-flow path fails |
-| `state.store` / `state.heap` / `state.oldHeaps` | Local variables, and the heap as a list of chunks (`resource(receiver; snapshot, permission)`) | Trace which symbolic value a variable holds; spot havocked (freshly re-assigned) values after calls; see which permissions the path actually holds |
+| `assumptions` | Path-condition terms in scope, pre-filtered to those sharing a symbol with `failedAssertion` (an `omitted` marker counts the rest). To test whether a fact is available, probe it with `Assert` |
+| `branchConditions` | The branch decisions leading to the failing path |
+| `state.store` / `state.heap` / `state.oldHeaps` | Local variables, and the heap as a list of chunks (`resource(receiver; snapshot, permission)`): which symbolic value a variable holds, what a call havocked, which permissions the path holds |
 
 Bulk fields — the full SMT session (`proverEmits`), the background axioms (`preambleAssumptions`), and the symbol declarations (`functionDecls`/`macroDecls`) — are collected and archived server-side. Oversized results also are truncated in `debug` and noted in the payload's `omitted` map. The result's top-level `recordedAt` names this run's archive directory, and `Read`ing its `result.json` gives the untruncated payloads. Whenever an `omitted` marker hides a field the diagnosis needs, read the archive instead of reasoning around the gap.
 
-Reading terms: `x@3@05` is a symbolic constant for program variable `x` (numbers are internal versions — successive assignments create new versions). Integers are boxed: `__prim__int___box__`/`int___unbox__` wrap between Python ints and SMT ints, and `_checkDefined(_, x, id)` wraps variable reads (it is identity on the value). `QA x :: body` is a universal quantifier. Pure functions appear applied to a snapshot argument first (`ipow(_, b, e)`).
+Reading terms: `x@3@05` is a symbolic constant for program variable `x` (numbers are internal versions — successive assignments create new versions). Integers are boxed: `__prim__int___box__`/`int___unbox__` wrap between Python ints and SMT ints, and `_checkDefined(_, x, id)` wraps variable reads (it is identity on the value). `QA x :: body` is a universal quantifier (its triggers are in `quantifiers`). `f%limited` is a function's trigger-safe alias, the same function as `f`; patterns use it. Pure functions appear applied to a snapshot argument first (`ipow(_, b, e)`).
 
 
 ### Interpreting `reasonUnknown`
-For most failures, start by understanding why the SMT-query failed, which is given in the `reasonUnknown` field:
 
-| Value | Meaning | Strategy |
-|---|---|---|
-| `(incomplete quantifiers)` | E-matching gave up: the instantiation chain to the proof was never triggered (under-instantiation). More solver time will not help. | If the failing goal is numerically obvious over ints, check the int-identity trap. Otherwise restate the missing fact as a GROUND fact placed where it is always visible: as a postcondition or a local `Assert`. Add only facts the payload shows are missing: speculative extra ground facts feed the instantiation engine and can slow everything down. For quantified goals, also check TRIGGER VOCABULARY: do the premise quantifiers' trigger terms occur under the goal's binder? If not, add a bridging quantified `Assert` whose trigger matches the goal's vocabulary and whose body mentions the premise triggers. |
+Start with why the SMT query failed, given in `reasonUnknown`.
+
+**`(incomplete quantifiers)`.** The solver stopped on its own, well inside the budget, with the goal still open: the ground facts plus every instantiation it made are consistent with the goal being false. This is the answer for almost every failure, more solver time never helps, and it does not say whether the state lacks the fact or merely never derived it. Work through it in order:
+
+1. Entailed or not? A `counterexample: true` re-run shows the assignment the solver found (a candidate model, a lead rather than a proof), and ground probe asserts show which facts are derivable. If the state does not entail the fact, the contract or invariant is wrong: fix that, not the proof.
+2. Over ints, check the int-identity trap (below) before anything else.
+3. Read `quantifiers`: does any term of `failedAssertion` or `assumptions` match a premise quantifier's `triggers`? If none does, the instantiation chain cannot start; a small `instantiations` count in `failingCheck` says the same. `viperExcerpt` maps a pattern back to the `Forall` it came from.
+4. Bridge the gap with an `Assert`: quantified, triggered on the goal's terms and mentioning the premise patterns, or the missing fact stated as a ground fact. Add only what the payload shows missing.
+
 <!-- if timeouts -->
-| `canceled` | The budget ran out while the solver was still working. | One diagnostic probe is worth it: re-run once with ~10x `assertTimeout` and read `rlimitDelta`. If it stops well below the new budget (reason flips to an incompleteness class), time was never the issue. If it scales with the budget, the proof is genuinely slow — apply the `nagini-performance` skill's budget policy and strategies. |
+**`canceled`, `unknown`.** The budget ran out while the solver was still working; `unknown` is the same event reported without a reason. Every budget question is answered here: `failingCheck.ms` at `budgetMs` and `rlimitDelta` at the cap mean the cap bound the check; a delta well below the cap means the solver stopped on its own. A large `instantiations` count on a budget-bound check is a matching loop or an instantiation explosion. One diagnostic probe is worth it: re-run once with ~10x `assertTimeout` and read `rlimitDelta` again. If it stops well below the new budget and the reason flips to an incompleteness class, time was never the issue. If it scales with the budget, the proof is genuinely slow: apply the `nagini-performance` skill's budget policy and strategies.
 <!-- end -->
-| `(incomplete (theory arithmetic))` | Nonlinear integer arithmetic (products, `//`, `%` of variables) is beyond the solver. | More time will not help. Restate the proof with stepping stones that avoid division/modulo OF PRODUCTS entirely: use the Euclid identity (`a == (a // d) * d + a % d`), pure polynomial identities (products may appear; the solver normalizes them), and the bounded-multiple inference (`0 <= m * d < d` implies `m == 0`). `(k * d) // d == k` and `(k * d) % d == 0` are NOT directly provable — derive them via the chain above. |
+
+**`(incomplete (theory arithmetic))`.** Nonlinear integer arithmetic (products, `//`, `%` of variables) is beyond the solver, and more time will not help. Restate the proof with stepping stones that avoid division and modulo of products entirely: the Euclid identity (`a == (a // d) * d + a % d`), pure polynomial identities (products may appear; the solver normalizes them), and the bounded-multiple inference (`0 <= m * d < d` implies `m == 0`). `(k * d) // d == k` and `(k * d) % d == 0` are not directly provable; derive them through that chain.
 
 ### The int-identity trap
 
@@ -198,6 +205,7 @@ A `insufficient.permission`, `fold.failed`/`unfold.failed`, or `leak_check.faile
 | The chunk with a **symbolic amount** (`# $k@50`) | The solver cannot prove the amount suffices (`$k > 0`, `$k >= 1/2`, ...) — assert where the fraction came from |
 | The chunk fractional (`# 1/2`) where a write or full-permission fold is demanded | Deliberate split not reassembled — see the spec's permission accounting |
 | A `MustTerminate`/obligation chunk in a `leak_check.failed` | Read the obligation measures in `failedAssertion` — the inequality states the budget deficit directly (e.g. a callee's `MustTerminate` measure not strictly below the caller's remaining budget) |
+| The chunk is present but the solver cannot prove it is | The proof context may be to big, explore performance issues | 
 Worked payload reads — a fact failure and a permission failure — are in `references/debugging-examples.md`.
 <!-- end -->
 

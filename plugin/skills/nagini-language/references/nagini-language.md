@@ -276,7 +276,10 @@ Forall(int, lambda i: (
 Every `Forall` should provide an explicit trigger. A trigger is a list of terms (inside `[[...]]`) mentioning all bound variables; the quantifier fires whenever matching terms appear in the proof context.
 
 - Every quantifier needs a trigger; nested quantifiers each need one (not just the innermost).
-- An empty trigger list `[]` tells the solver to infer one. This can lead to unpredictable instantiation behavior.
+- For an empty trigger list `[]` , Nagini supplies its own trigger. These are both incomplete and quite broad, so you should always provide your own.
+<!-- if errors -->
+- `debug.viperExcerpt` on a failing diagnostic shows the trigger each quantifier ended up with.
+<!-- end -->
 - Each quantified variable must appear in at least one trigger expression.
 - Each trigger expression must mention at least one quantified variable and should contain some structure beyond the variable itself (typically a function application).
 - Avoid arithmetic and boolean operators in trigger expressions, they lead to unpredictable instantiation.
@@ -616,14 +619,17 @@ from nagini_contracts.obligations import MustTerminate
 
 def quicksort(arr: List[int]) -> List[int]:
     Requires(Acc(list_pred(arr), 2/3))
-    Requires(MustTerminate(2 + len(arr)))   # ← termination measure
+    Requires(MustTerminate(100 + 2*len(arr)))   # ← termination measure, with headroom
     Ensures(Acc(list_pred(arr), 2/3))
     ...
     quicksort(less)   # Nagini verifies len(less) < len(arr) satisfies the bound
     quicksort(more)
 ```
 
-Every call in the body must have a measure strictly below the caller's. Builtin calls count — list construction, `append`, etc. have measure 1 — so any method that calls anything needs at least `MustTerminate(2)`; with `MustTerminate(1)` the first such call fails.
+Every call in the body must have a measure strictly below the caller's. Builtin calls count and usually have measure 1.
+<!-- if knowledge -->
+It is better to leave a good amount of headroom in the measure, so that adding calls later on does not break the termination proof. 
+<!-- end -->
 
 A loop inside a `MustTerminate` method must carry its own termination invariant:
 

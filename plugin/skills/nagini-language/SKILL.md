@@ -38,7 +38,7 @@ In particular, this includes a whole-run `--timeout` and per-assert SMT budget `
 
 <!-- if errors -->
 - `counterexample: true` — include concrete failing variable assignments in each diagnostic.
-- `include_viper: true` — return the translated Viper program as `viperProgram`. Request only when inspecting the encoding; even small files translate to hundreds of lines.
+- `include_viper: true` — return the whole translated Viper program as `viperProgram` (thousands of lines for a large module). A failing diagnostic's `debug.viperExcerpt` already carries the member concerned.
 <!-- end -->
 - `translate_only: true` — stop after translation (mypy + Nagini-to-Viper); nothing is verified.
 
@@ -47,9 +47,9 @@ Result shape:
 {"success": bool, "translationFailed": bool, "duration": float,
  "diagnostics": [{"file": str, "startLine": int, "startCol": int,
                   "code": str, "message": str, "reason": str,
-                  "counterexample": str, "branchConditions": [str], "vias": []}]}
+                  "reasonPosition": [int, int], "counterexample": str, "branchConditions": [str], "vias": []}]}
 ```
-Pass/fail is the `success` field. `translationFailed: true` marks syntax/type/translation errors as opposed to verification failures. `startLine` is 1-indexed.
+Pass/fail is the `success` field. `translationFailed: true` marks syntax/type/translation errors as opposed to verification failures. `startLine` is 1-indexed. `reasonPosition` is the line and column of the clause the `reason` names, such as the failing postcondition; `[0, 0]` when there is none.
 <!-- else -->
 Verification runs through the `nagini` MCP server.
 
