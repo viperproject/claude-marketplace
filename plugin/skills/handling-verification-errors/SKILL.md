@@ -18,7 +18,7 @@ Understand the failure before fixing it: every fix responds to evidence gathered
 
 - **Probe asserts** — reduce the error to a single failing assertion and measure which facts the solver can derive around it.
 <!-- if errors -->
-- **Interrogate the verifier** — extract what the verifier saw and did at the narrowed failure: the symbolic state, the solver's reason for giving up, the encoding.
+- **Read the payload** — why and where the solver stopped, which quantified facts were in reach, which permissions the path held.
 <!-- end -->
 - **Minimal reproduction** — capture the missing step in a self-contained candidate file and attack it in isolation.
 
@@ -50,7 +50,11 @@ Often the probes themselves are the fix. A few well-placed `Assert(...)` stateme
 To pick candidate intermediate facts to probe with, use the patterns below. You can use multiple strategies at once.
 
 <!-- if errors -->
-**Explicit failing SMT-queries**: the `failedAssertion` term (see below) is the exact obligation the solver could not prove. Translate it back to Python and assert it before the failing point.
+**Explicit failing SMT-queries**: the `failedAssertion` term is the obligation the solver could not prove. Translate it back to Python and assert it before the failing point.
+ 
+**Trigger check**: when `reasonUnknown` is `(incomplete quantifiers)`, find the fact you are counting on in `quantifiers` (or `assumptions`) and compare its `triggers` with the terms of `failedAssertion`. No matching term means the fact can never fire here, whatever the budget: probe with an `Assert` that mentions the trigger's terms, or state the instance you need as a ground fact.
+
+**Chunk comparison**: on a permission failure, compare the chunk `failedAssertion` demands with `state.heap` and `state.oldHeaps`. The heap shapes below say which cause each mismatch points to; the probe is the aliasing fact, the guard equality or the `Unfold` that shape names.
 <!-- end -->
 
 **Weakest-precondition backtracking** to move a failing assert earlier. To debug a failing `assert P`, move it earlier by computing the weakest precondition over the preceding statement. Repeat until the assert passes (bug is between the two positions) or reaches method entry (precondition too weak).
@@ -121,72 +125,70 @@ When a fold fails, assert each component of the predicate body separately (witho
 <!-- end -->
 
 <!-- if errors -->
-## Interrogate the verifier
+## What the verifier reports
 
-The failing diagnostic carries evidence (the location, the `message`, the `reason`, and the `debug` payload), and the verify tools produce more of it on demand: re-verification with different flags or budgets, the untruncated archive, the Viper encoding. Use them actively: every question of the form "what did the verifier actually see or do here?" has a tool answer.
+A verification failure is Silicon giving up on one prover query, or finding one permission chunk missing, on one symbolic path. The diagnostic's `message` and `reason` name the Python construct; the `debug` payload is what Silicon held at that moment, in its term language. It answers questions probing cannot: whether a query ran at all, why the solver stopped, which quantified facts were in reach, which permissions the path held.
 
-How an operator, builtin, or contract clause is actually encoded determines what the solver can possibly derive about it. A failing diagnostic's `debug.viperExcerpt` carries the Viper text of the member that failed and of the quantified functions and predicates it mentions. `include_viper: true` on any verify tool returns the whole translated program as `viperProgram` when the excerpt is not enough.
+### The failure
 
-Each failing diagnostic's `debug` object contains the symbolic state at the failure, expressed in the verifier's internal term language:
-
-| Field | Content |
-|---|---|
-| `failedAssertion` | The exact goal term the solver could not prove, as encoded, not as you wrote it |
-| `failedAssertionPretty` | The same goal with `@line@col` suffixes stripped and `_checkDefined` shims unwrapped; the raw term is for when versions matter |
-| `reasonUnknown` | Why the solver returned unknown. This is the main diagnosis lever |
-| `quantifiers` | The quantified assumptions in scope, each with its `triggers`, `vars` and `body` |
-| `viperExcerpt` | The Viper text of the failing member (`member`, `kind`, `viper`) and of the quantified functions and predicates it mentions (`quantified`). Several failures in one member carry it once: the later ones hold `sameAs`, the index of the diagnostic that has it |
-| `failingCheck` | The prover query that produced the failure: `kind` (`assert` is a proof obligation, `check` a heap query), `answer`, wall `ms`, `budgetMs` and `instantiations`. Absent when no query was run, such as a chunk missing outright |
+| Field | What it is | What it tells you |
+|---|---|---|
+| `failedAssertion` | The goal term the prover was asked to prove, as encoded: a boolean term for a fact, a permission expression for a chunk | Which obligation this is among a conjunction, which variable versions it is about, and which encoded operator or function it goes through — possibly a different one than the Python source suggests |
+| `failingCheck` | The prover query that produced the failure: `kind` (`assert` for a proof obligation, `check` for a query Silicon asks while executing), `answer`, wall `ms`, `budgetMs`, and Z3's `instantiations` during the query | If this field is  absent then no SMT-query ran, the error was produced in Silicon directly, e.g. for a chunk that was not in the heap at all. A small `instantiations` count means the quantifier machinery barely engaged; a very large one, that it ran away |
+| `reasonUnknown` | Z3's own reason for answering unknown | The class of the failure. |
 <!-- if timeouts -->
-| `rlimitDelta` | Prover resources the failing check consumed, in Z3 rlimit units; the budget is `assertTimeout` ms × 9000 |
+| `rlimitDelta` | Prover resources the query consumed, in Z3 rlimit units; the cap is `assertTimeout` ms × 9000 | At the cap: the budget ended the query. Well below it: the solver stopped by itself, and more budget will not change the answer. Wall `ms` can exceed `budgetMs` either way — the budget is enforced as rlimit, not time |
 <!-- else -->
-| `rlimitDelta` | Prover resources the failing check consumed, in Z3 rlimit units. Compared across probes, a delta that grows with the proof context is a budget-bound check; a small one means the solver stopped on its own |
+| `rlimitDelta` | Prover resources the query consumed, in Z3 rlimit units | The cost of this one query. Compared across probes it shows whether a change made the query cheaper; a delta that grows with every added fact is a query drowning in context |
 <!-- end -->
-| `assumptions` | Path-condition terms in scope, pre-filtered to those sharing a symbol with `failedAssertion` (an `omitted` marker counts the rest). To test whether a fact is available, probe it with `Assert` |
-| `branchConditions` | The branch decisions leading to the failing path |
-| `state.store` / `state.heap` / `state.oldHeaps` | Local variables, and the heap as a list of chunks (`resource(receiver; snapshot, permission)`): which symbolic value a variable holds, what a call havocked, which permissions the path holds |
 
-Bulk fields — the full SMT session (`proverEmits`), the background axioms (`preambleAssumptions`), and the symbol declarations (`functionDecls`/`macroDecls`) — are collected and archived server-side. An oversized result is shrunk to fit: long terms and lists are cut in `debug` and noted in the payload's `omitted` map; with many failures at once, only the first few keep a payload (the rest hold `omitted.debug`) and trailing diagnostics may be left out, counted in the result's `diagnosticsDropped`. The result's top-level `recordedAt` names this run's archive directory, and `Read`ing its `result.json` gives the untruncated payloads and every diagnostic. Whenever an `omitted` marker hides a field the diagnosis needs, read the archive instead of reasoning around the gap.
+What each `reasonUnknown` value means:
+
+| Value | What happened | More time | The fact may still hold |
+|---|---|---|---|
+| `(incomplete quantifiers)` | The solver stopped inside its budget with the goal open: every instantiation it tried still left a model in which the goal is false. Its heuristics found no way from the facts to the goal — either no fact bridges the gap, or the bridging quantifier never fired on the terms present | never helps | yes: the state may entail it and the solver never derived it — or may not entail it at all. The payload does not distinguish the two; probes do |
+<!-- if timeouts -->
+| `canceled`, `unknown` | The budget ended the query while the solver was still working; `unknown` is the same event without a reason string. `rlimitDelta` is at the cap | may help, up to a point: a query that closes within ~10x the budget was merely slow; one that scales with any budget is a matching loop or an instantiation explosion (a large `instantiations` count), a performance problem for the `nagini-performance` skill | unknown |
+<!-- end -->
+| `(incomplete (theory arithmetic))` | The goal needs nonlinear integer reasoning — products, `//`, `%` of variables — which the solver does not decide | never helps | yes, by a different proof |
+
+### The state
+
+| Field | What it is | What it tells you |
+|---|---|---|
+| `state.store` | The local variables and their current symbolic values, `name -> symbol` (`heap -> heap@13@07`). Nagini's ghost machinery is listed too (`_cthread`, `_caller_measures`, `_residue`, `_current_wait_level`, ...) and can be ignored | Which version of a variable the goal is about, and whether two names denote the same symbol. A variable bound to a fresh version after a loop or a call was havocked there: what the invariant or postcondition says about it is all the solver knows |
+| `state.heap` | The permissions the path holds at the failure, one chunk per line: `resource(snapshot; receiver) # amount` — a field chunk, a `list_pred`/`dict_pred` chunk, a folded predicate (`Box_mypred(sm; x) # W`), or a quantified permission (`QA` chunk with a guard) | What is held, on which receiver symbol, in which amount. A demanded chunk that is absent, present on another receiver symbol, held in a fraction, or hidden inside a folded predicate — each is a different cause, catalogued under heap shapes |
+| `state.oldHeaps` | The same listing at the labelled earlier states; `old` is method entry | Whether a chunk missing now was ever held on this path: present in `old` and gone now means consumed between entry and here, by a `Fold` or a call; never present means the contract or invariant never provided it on this path |
+
+### The encoding
+
+| Field | What it is | What it tells you |
+|---|---|---|
+| `quantifiers` | The quantified facts among the path conditions at the failure, each with its `vars`, `triggers` and `body`: the loop invariants, contract clauses, `Forall` asserts and unfolded predicate bodies in scope. The background axioms (pure function definitions and postconditions) are not path conditions; they show in `viperExcerpt` | Whether a premise that could bridge the gap exists at all, and what it needs to fire: a quantifier is instantiated only when a term matching one of its triggers is present. If no term of `failedAssertion`, or of the facts around it, matches any trigger of the fact you are counting on, the chain cannot start whatever the budget |
+| `viperExcerpt` | The Viper text of the failing member (`member`, `kind`, `viper`) and, under `quantified`, of the quantified functions and predicates it mentions. Several failures in one member carry it once; the later ones hold `sameAs`, the index of the diagnostic that has it | How a contract clause, operator or builtin is really encoded, and which trigger each `forall` ended up with — including the ones Nagini chose for an empty trigger list. `include_viper: true` on a verify call returns the whole program as `viperProgram` when the excerpt is not enough |
 
 Reading terms: `x@3@05` is a symbolic constant for program variable `x` (numbers are internal versions — successive assignments create new versions). Integers are boxed: `__prim__int___box__`/`int___unbox__` wrap between Python ints and SMT ints, and `_checkDefined(_, x, id)` wraps variable reads (it is identity on the value). `QA x :: body` is a universal quantifier (its triggers are in `quantifiers`). `f%limited` is a function's trigger-safe alias, the same function as `f`; patterns use it. Pure functions appear applied to a snapshot argument first (`ipow(_, b, e)`).
 
+A `TimeoutOccurred` diagnostic carries a different payload — what each verifier had in flight and where the time went — described in the `nagini-performance` skill.
 
-### Interpreting `reasonUnknown`
+### Beyond the payload
 
-Start with why the SMT query failed, given in `reasonUnknown`.
+The payload is the verdict; everything else Silicon recorded is archived and read with `inspect(recorded_at=<the result's recordedAt>, diagnostic=<index>, fields=[...])`, without re-verifying. Without `fields` it lists what is archived with sizes. Ask for a field when the payload leaves one of these questions open:
 
-**`(incomplete quantifiers)`.** The solver stopped on its own, well inside the budget, with the goal still open: the ground facts plus every instantiation it made are consistent with the goal being false. This is the answer for almost every failure, more solver time never helps, and it does not say whether the state lacks the fact or merely never derived it. Work through it in order:
+| Field | What it is | The question it answers |
+|---|---|---|
+| `assumptions` | Every fact the solver held on this path at the failure, as terms, newest last: path conditions, unfolded contract clauses, the results of earlier checks | *Is fact F present at all, and in which shape?* A probe tells you whether F is derivable; `assumptions` with `contains=<symbol or function>` shows the form it actually has — which variable version, boxed or unboxed, which function alias. A fact present in a shape that shares no term with the goal is the usual reason a quantifier never fires. Absence proves little: derived facts are not listed, and a present quantified fact still needs a trigger |
+| `branchConditions` | The path's branch decisions as terms, before Nagini maps them to Python | *Which encoded case is this path in?* Needed when the diagnostic's own `branchConditions` is empty or too coarse because the branch lives in the encoding: a type test, a definedness check, an exceptional path, a predicate body guard |
+| `preambleAssumptions` | The background axioms: Nagini's domain definitions and every pure function's definitional axiom and postconditions | *What does builtin or function G guarantee, exactly?* `contains=<G>` returns its axioms — the semantics of a sequence, set or dict operation, or the postcondition a `@Pure` function exports, as the solver sees it. This is where an operator's encoding differs from the Python intuition |
+| `functionDecls`, `macroDecls` | The declared symbols with their sorts, and the macros the encoding abbreviates | *What is symbol S?* When a term uses a name the store does not explain — a snapshot map `sm@8@01`, a `$t` temporary — its declaration gives the sort, and a macro its expansion |
+| `proverEmits` | The full SMT session up to the failing query, in order | *What did Z3 actually receive?* The last entries (`last=20`) are the failing query as sent: the exact assertions and the `check-sat`. A last resort for encoding doubts and for reproducing a query offline; large |
+| `state.*`, `viperExcerpt.*`, `quantifiers`, `failedAssertion` | The payload fields, untruncated | *What did the cut hide?* Whatever `omitted` names in a shrunk payload is here whole |
 
-1. Entailed or not? A `counterexample: true` re-run shows the assignment the solver found (a candidate model, a lead rather than a proof), and ground probe asserts show which facts are derivable. If the state does not entail the fact, the contract or invariant is wrong: fix that, not the proof.
-2. Over ints, check the int-identity trap (below) before anything else.
-3. Read `quantifiers`: does any term of `failedAssertion` or `assumptions` match a premise quantifier's `triggers`? If none does, the instantiation chain cannot start; a small `instantiations` count in `failingCheck` says the same. `viperExcerpt` maps a pattern back to the `Forall` it came from.
-4. Bridge the gap with an `Assert`: quantified, triggered on the goal's terms and mentioning the premise patterns, or the missing fact stated as a ground fact. Add only what the payload shows missing.
+A verify result is shrunk when large: long terms and lists are cut in `debug` and noted in its `omitted` map; with many failures at once only the first few keep a payload (the rest hold `omitted.debug`) and trailing diagnostics may be left out, counted in `diagnosticsDropped`. A narrower verify (the one member) is the other way to a full payload. List fields come back newest-first-cut: `last` bounds the count, `contains` filters by substring; use both rather than paging.
 
-<!-- if timeouts -->
-**`canceled`, `unknown`.** The budget ran out while the solver was still working; `unknown` is the same event reported without a reason. Every budget question is answered here: `failingCheck.ms` at `budgetMs` and `rlimitDelta` at the cap mean the cap bound the check; a delta well below the cap means the solver stopped on its own. A large `instantiations` count on a budget-bound check is a matching loop or an instantiation explosion. One diagnostic probe is worth it: re-run once with ~10x `assertTimeout` and read `rlimitDelta` again. If it stops well below the new budget and the reason flips to an incompleteness class, time was never the issue. If it scales with the budget, the proof is genuinely slow: apply the `nagini-performance` skill's budget policy and strategies.
-<!-- end -->
+### Heap shapes
 
-**`(incomplete (theory arithmetic))`.** Nonlinear integer arithmetic (products, `//`, `%` of variables) is beyond the solver, and more time will not help. Restate the proof with stepping stones that avoid division and modulo of products entirely: the Euclid identity (`a == (a // d) * d + a % d`), pure polynomial identities (products may appear; the solver normalizes them), and the bounded-multiple inference (`0 <= m * d < d` implies `m == 0`). `(k * d) // d == k` and `(k * d) % d == 0` are not directly provable; derive them through that chain.
-
-### The int-identity trap
-
-A special case of `(incomplete quantifiers)` worth checking before anything else: the failing fact is *numerically obvious* over ints — `PSeq(y) == PSeq(x)` from `y == x`, a `f(y)` fact not transferring to `f(x)` for `@Pure` `f`, `x in s` from `1 in s and x == 1`, a goal embedding `(1 if v == x else 0)`. The cause is that `x` is not known to be exactly `int` (the static type admits subclasses such as `bool`), so `==` gives value equality but not the object identity these positions need — semantics and failing shapes in the `nagini-language` reference, Integers → Typing.
-
-The fix: ensure the type of the variables involved is exactly `int`, excluding subtypes, via **`type(x) == int`**. State it where you state any other fact about `x`, and carry it along like a permission.
-
-| Place | Write |
-|---|---|
-| `int` parameter | `Requires(type(x) == int)` |
-| `int` return value | `Ensures(type(Result()) == int)` |
-| `int` field | `type(self.n) == int` next to `Acc(self.n)` in the predicate / postcondition of `__init__` |
-| contents of a `List[int]` / `Set[int]` / `PSeq[int]` | `Forall(xs, lambda e: (type(e) == int, []))` in the same pre/post/invariant as `list_pred(xs)` — the element form; it is preserved across `append` of exact ints and through loops that build the list, whereas the index form `Forall(int, lambda i: Implies(0 <= i and i < len(xs), type(xs[i]) == int))` needs extra frame assertions after each mutation |
-| loop counter / accumulator | `Invariant(type(i) == int)` (preserved by `i += 1`) |
-| `Forall(int, ...)` whose body identifies `i` (membership, `@ContractOnly`) | add `type(i) == int` to the guard: `Implies(type(i) == int and lo <= i and i < hi, ...)`. The guard then has to be discharged at every use: the concrete index must carry its own `type(x) == int` fact (parameter: `Requires`; local: `Assert`), or the instantiation silently fails. Leave the guard out when the body does not need it |
-
-If no `type(x) == int` fact can be carried to a use site (e.g. an element read from a `List[int]` verified without an element-type invariant), use the fact that every arithmetic result is exactly `int`: `f(x + 0)` supports the identity reasoning that `f(x)` lacks. A local rescue only, for when proper typing is not possible.
-
-### Interpreting `state.heap`
-A `insufficient.permission`, `fold.failed`/`unfold.failed`, or `leak_check.failed` diagnostic means that a required permission chunk or obligation could not be exhaled. Start from the heap listing `state.heap`, which is a short list of what the path holds at the failure: `resource(receiver; snapshot) # amount`. Compare it against what the failing construct demands (`failedAssertion` names the demanded chunk). The read classifies the failure into one of two shapes:
+A permission failure — `insufficient.permission`, `fold.failed`/`unfold.failed`, `leak_check.failed` — is a chunk the path could not give up. `failedAssertion` names the demanded chunk and `state.heap` what was held; the pairing takes one of these shapes.
 
 **The demanded chunk is absent:**
 
@@ -205,9 +207,43 @@ A `insufficient.permission`, `fold.failed`/`unfold.failed`, or `leak_check.faile
 | The chunk with a **symbolic amount** (`# $k@50`) | The solver cannot prove the amount suffices (`$k > 0`, `$k >= 1/2`, ...) — assert where the fraction came from |
 | The chunk fractional (`# 1/2`) where a write or full-permission fold is demanded | Deliberate split not reassembled — see the spec's permission accounting |
 | A `MustTerminate`/obligation chunk in a `leak_check.failed` | Read the obligation measures in `failedAssertion` — the inequality states the budget deficit directly (e.g. a callee's `MustTerminate` measure not strictly below the caller's remaining budget) |
-| The chunk is present but the solver cannot prove it is | The proof context may be to big, explore performance issues | 
+| The demanded chunk is present, matching in receiver and amount | The exhale was a solver query after all — a snapshot or permission equality it could not prove: `failingCheck` is present and `reasonUnknown` applies, usually a proof context too large for the query, see the `nagini-performance` skill |
+
 Worked payload reads — a fact failure and a permission failure — are in `references/debugging-examples.md`.
 <!-- end -->
+
+## Recurring causes
+
+### Integers that are not exactly `int`
+
+<!-- if errors -->
+The signature is `(incomplete quantifiers)` on a fact that is *numerically obvious* over ints — 
+<!-- else -->
+The failing fact is *numerically obvious* over ints — 
+<!-- end -->
+`PSeq(y) == PSeq(x)` from `y == x`, a `f(y)` fact not transferring to `f(x)` for `@Pure` `f`, `x in s` from `1 in s and x == 1`, a goal embedding `(1 if v == x else 0)`. The cause is that `x` is not known to be exactly `int` (the static type admits subclasses such as `bool`), so `==` gives value equality but not the object identity these positions need — semantics and failing shapes in the `nagini-language` reference, Integers → Typing.
+
+The fix: ensure the type of the variables involved is exactly `int`, excluding subtypes, via **`type(x) == int`**. State it where you state any other fact about `x`, and carry it along like a permission.
+
+| Place | Write |
+|---|---|
+| `int` parameter | `Requires(type(x) == int)` |
+| `int` return value | `Ensures(type(Result()) == int)` |
+| `int` field | `type(self.n) == int` next to `Acc(self.n)` in the predicate / postcondition of `__init__` |
+| contents of a `List[int]` / `Set[int]` / `PSeq[int]` | `Forall(xs, lambda e: (type(e) == int, []))` in the same pre/post/invariant as `list_pred(xs)` — the element form; it is preserved across `append` of exact ints and through loops that build the list, whereas the index form `Forall(int, lambda i: Implies(0 <= i and i < len(xs), type(xs[i]) == int))` needs extra frame assertions after each mutation |
+| loop counter / accumulator | `Invariant(type(i) == int)` (preserved by `i += 1`) |
+| `Forall(int, ...)` whose body identifies `i` (membership, `@ContractOnly`) | add `type(i) == int` to the guard: `Implies(type(i) == int and lo <= i and i < hi, ...)`. The guard then has to be discharged at every use: the concrete index must carry its own `type(x) == int` fact (parameter: `Requires`; local: `Assert`), or the instantiation silently fails. Leave the guard out when the body does not need it |
+
+If no `type(x) == int` fact can be carried to a use site (e.g. an element read from a `List[int]` verified without an element-type invariant), use the fact that every arithmetic result is exactly `int`: `f(x + 0)` supports the identity reasoning that `f(x)` lacks. A local rescue only, for when proper typing is not possible.
+
+### Nonlinear arithmetic
+
+<!-- if errors -->
+The signature is `(incomplete (theory arithmetic))`, with products, `//` or `%` of variables in `failedAssertion`.
+<!-- else -->
+The goal involves products, `//` or `%` of variables.
+<!-- end -->
+More time never helps. Restate the proof with stepping stones that avoid division and modulo of products entirely: the Euclid identity (`a == (a // d) * d + a % d`), pure polynomial identities (products may appear; the solver normalizes them), and the bounded-multiple inference (`0 <= m * d < d` implies `m == 0`). `(k * d) // d == k` and `(k * d) % d == 0` are not directly provable; derive them through that chain.
 
 ## Minimal reproduction
 

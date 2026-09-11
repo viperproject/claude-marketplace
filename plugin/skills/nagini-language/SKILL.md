@@ -42,6 +42,8 @@ SMT-state collection (`--smtStateOnError`) is among them: every verification fai
 <!-- if errors -->
 - `counterexample: true` — include concrete failing variable assignments in each diagnostic.
 - `include_viper: true` — return the whole translated Viper program as `viperProgram` (thousands of lines for a large module). A failing diagnostic's `debug.viperExcerpt` already carries the member concerned.
+
+`mcp__nagini__inspect(recorded_at, diagnostic, fields)` reads a diagnostic's archived payload without re-verifying: `recorded_at` is the verify result's `recordedAt`, `diagnostic` the index into its `diagnostics`. Without `fields` it lists what is archived with sizes; with `fields` (e.g. `["assumptions", "state.heap"]`) it returns them, list fields as their newest `last` entries, filtered to those containing `contains` when given.
 <!-- end -->
 - `translate_only: true` — stop after translation (mypy + Nagini-to-Viper); nothing is verified.
 
