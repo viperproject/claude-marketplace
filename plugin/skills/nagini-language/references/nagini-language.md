@@ -345,8 +345,19 @@ def streams_injective(streams: Dict[int, Stream]) -> bool:
 
 ## Ghost Code
 
-Ghost code exists only for verification: Nagini checks that it can never influence regular execution, and can erase it without changing the program's behavior. Everything inside contract calls (`Requires`, `Ensures`, `Invariant`, `Assert`, ...) is ghost automatically; the constructs below make ghost *state and code* explicit outside contracts.
+A Nagini program has two layers: the regular Python program, and ghost code that exists only for the verifier: specifications, proof steps, and the mathematical state they reason about. Information flows can flow from regular code to ghost code, but never back, so erasing the ghost code leaves the same program with the same behavior.
 
+### What is ghost
+
+- A call to `Requires`, `Ensures`, `Invariant`, `Assert`, `Fold`, `Unfold`, `Decreases`, `MustTerminate`, or a `@Ghost` function at any statement position of a regular body.
+- Ghost values: ghost-typed parameters, fields and locals, ghost arguments of a call, variable of ghost types, the ghost half of a mixed `Tuple` return, and every assignment to them.
+- A def or class decorated `@Ghost`, and every `@Predicate`.
+- `Unfolding(P, e)` and `Reveal(e)` wrapped around a (possibly non-ghost) expression `e`: Erasing the wrappers leaves just `e`.
+- The `nagini_contracts` import and every Nagini decorator.
+
+Ghost code must provably terminate: a `@Ghost` method needs `Requires(MustTerminate(measure))` (see Termination), a `@Ghost @Pure` function proves termination via `Decreases`.
+
+<!-- if knowledge -->
 ### Ghost types
 
 The P-collections (`PSeq`, `PByteSeq`, `PSet`, `PMultiset`) and the ghost primitives `GInt`, `GFloat`, `GBool`, `GStr`, `GComplex` are ghost types. `MarkGhost` declares a ghost alias of your own:
@@ -356,16 +367,7 @@ GIdx = int
 MarkGhost(GIdx)
 ```
 
-A ghost-typed value may appear in contracts and ghost code but not in regular executable code. Assigning one to a non-ghost target is rejected:
-
-```python
-def probe(cs: PSeq[BValue], i: int) -> None:
-    kind: int = cs[i].kind    # REJECTED: "Ghost values may only be assigned
-                              # to ghost targets"
-    kind: GInt = cs[i].kind   # OK: ghost local
-```
-
-The reverse direction is fine — regular values may flow into ghost targets.
+A ghost-typed value may appear in contracts and ghost code but not in regular executable code. Assigning one to a non-ghost target is rejected. The reverse direction is fine: regular values may flow into ghost targets.
 
 ### Ghost variables and mixed returns
 
@@ -390,9 +392,16 @@ def counted_sum(l: List[int]) -> Tuple[int, GIdx]:
 
 ### `@Ghost` functions and classes
 
-`@Ghost` marks a whole def (or class) as ghost. Ghost functions may be called from specs and as ghost statements in regular code, but never where the result reaches regular execution. Ghost code must provably terminate: a `@Ghost` method needs `Requires(MustTerminate(measure))` (see Termination), a `@Ghost @Pure` function proves termination via `Decreases` as usual.
+`@Ghost` marks a whole def (or class) as ghost. A def whose result depends on ghost inputs must be ghost, since a regular result may not depend on a ghost value: a `@Pure` function over a `PSeq` is `@Ghost @Pure`, a lemma over ghost values is `@Ghost` with `MustTerminate`. A bare call to a `@Ghost` function in a regular body is a ghost statement.
 
-**A `@Pure` helper over ghost values must be `@Ghost @Pure`.** A plain `@Pure` function taking a `PSeq` and returning `bool` or `int` is rejected. The same applies to lemma *methods* over ghost values — a lemma taking a `PSeq` must be `@Ghost` (plus `MustTerminate`); a bare call to it in a regular body is a ghost statement.
+### What is not ghost
+
+- Every control-flow statement. An `if`, `while`, `for`, `with` or `try` is not ghost even if its body is entirely ghost.
+- A plain `@Pure` function: regular code, only the decorator is ghost.
+- A call assigned to ghost targets: the targets are ghost, the call is not.
+
+So a proof over regular code may add ghost code anywhere, including ghost locals naming side-effect-free expressions (a field read, a `@Pure` call), but should not add a branch, a loop, a regular local, or a ghost local holding the result of a regular call.
+<!-- end -->
 
 ## Containers
 

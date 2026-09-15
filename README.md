@@ -26,7 +26,7 @@ To use your own nagini instead, set `NAGINI_FROM` to any `uvx --from` source in 
 In Claude Code:
 
 ```
-/plugin marketplace add viperproject/nagini-claude-plugin
+/plugin marketplace add viperproject/claude-marketplace
 /plugin install nagini@viperproject
 ```
 
@@ -45,10 +45,10 @@ Ask Claude to verify, prove, or add specifications to Python code — the `nagin
 claude plugin validate ./plugin
 
 # run a session with the local checkout instead of the installed version
-claude --plugin-dir /path/to/nagini-claude-plugin/plugin
+claude --plugin-dir /path/to/claude-marketplace/plugin
 ```
 
-Inside a session, `/reload-plugins` picks up local edits without restarting. Alternatively, add the checkout as a local marketplace: `/plugin marketplace add ./nagini-claude-plugin`.
+Inside a session, `/reload-plugins` picks up local edits without restarting. Alternatively, add the checkout as a local marketplace: `/plugin marketplace add ./claude-marketplace`.
 
 Layout — the plugin itself lives in `plugin/`; everything outside it (tests, CI) stays out of users' installed copies:
 
