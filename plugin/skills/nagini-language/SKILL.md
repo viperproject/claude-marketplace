@@ -21,11 +21,13 @@ This skill provides the Nagini language reference and the verification tool cont
 
 ## Verification tools
 
+Verification runs through the `nagini` MCP server.
 <!-- if knowledge -->
-Verification runs through the `nagini` MCP server. If a `mcp__nagini__` tool call fails with "No such tool available", load the tools with `ToolSearch("select:mcp__nagini__verify_method,mcp__nagini__verify_snippet,mcp__nagini__verify_file,mcp__nagini__cancel,mcp__nagini__flush_cache")` and retry. If the tools are still unavailable, do not fall back to the `nagini` CLI: diagnose with the plugin README.md and walk the user through the fix. The server spawns once at Claude Code startup with its launch environment, so most fixes require restarting Claude Code.
+If a `mcp__nagini__` tool call fails with "No such tool available", load the tools with `ToolSearch("select:mcp__nagini__verify_method,mcp__nagini__verify_snippet,mcp__nagini__verify_file,mcp__nagini__cancel,mcp__nagini__flush_cache")` and retry. If the tools are still unavailable, do not fall back to the `nagini` CLI: diagnose with the plugin README.md and walk the user through the fix. The server spawns once at Claude Code startup with its launch environment, so most fixes require restarting Claude Code.
+<!-- end -->
 
-
-- `mcp__nagini__verify_method(path, methods)` — the primary tool. `path` must be absolute. `methods` is a list of member names: a bare function name, `ClassName.method_name`, or `ClassName` (all its methods). Verify only what you are working on: the one method while iterating on it, and when several methods need (re-)checking, as one list in a single call.
+- `mcp__nagini__verify_method(path, methods)` — the primary tool. `path` must be absolute. `methods` is a list of member names: a bare function name, `ClassName.method_name`, or `ClassName` (all its methods). Verify only what you are working on: the one method while iterating on it, and when several methods need (re-)checking, pass them as one list in a single call.
+<!-- if knowledge -->
 - `mcp__nagini__verify_snippet(code)` — verify inline code without creating a file.
 - `mcp__nagini__verify_file(path)` — verify a whole file; on a small file the simpler equivalent of listing every member. Once a whole-file run takes more than a couple of minutes, it is better to verify the changed members and their dependents instead. An optional `methods` list restricts it like `verify_method`, `base_dir` sets the package root for intra-package imports, and `ignore_global` skips top-level statements. With `translate_only: true` it is the standard well-formedness check for a file (e.g. a test file before verification).
 
@@ -58,20 +60,15 @@ Pass/fail is the `success` field. `translationFailed: true` marks syntax/type/tr
 <!-- if errors -->
 With diagnostics on, the result also carries `timings` (seconds per pipeline phase: typecheck, translate, chop, verify) and `recordedAt` (this run's archive directory), and every verification failure a `debug` payload. `include_viper` adds `viperProgram`.
 <!-- end -->
-<!-- else -->
-Verification runs through the `nagini` MCP server.
-
-- `mcp__nagini__verify_method(path, methods)` — the primary tool. `path` must be absolute. `methods` is a list of member names: a bare function name, `ClassName.method_name`, or `ClassName` (all its methods). Verify only what you are working on: the one method while iterating on it, and when several methods need (re-)checking, pass them as one list in a single call.
 <!-- end -->
 
 `mcp__nagini__cancel(job_token)` cancels an in-flight verification; `mcp__nagini__flush_cache()` clears the verification result cache.
 
 <!-- if knowledge -->
 
-<!-- if timeouts -->
-The result cache keys entries on the file content and backend; verifier flags are not part of the key. Editing a file therefore changes its cache key — after an edit, re-verifying needs no flush. Flush only when re-running *unchanged* content under different `viper_args` (e.g. a raised `--assertTimeout`), where the old flags' result would be served back; `--disableCaching` on the probe is a flush-free alternative. `flush_cache()` clears the whole cache for every agent sharing the server, so a spurious flush makes everyone re-pay verification that a warm cache would have served.
-<!-- else -->
 The result cache keys entries on the file content and backend; verifier flags are not part of the key. Editing a file therefore changes its cache key — after an edit, re-verifying needs no flush. Flush only when re-running *unchanged* content under different `viper_args`, where the old flags' result would be served back; `--disableCaching` on the probe is a flush-free alternative. `flush_cache()` clears the whole cache for every agent sharing the server, so a spurious flush makes everyone re-pay verification that a warm cache would have served.
+<!-- if timeouts -->
+A raised `--assertTimeout` probe on unchanged content is the typical case.
 <!-- end -->
 <!-- if errors -->
 A failure served from the cache carries a `[note: result served from the verification cache …]` marker and no `debug` payload.
@@ -105,8 +102,4 @@ Working verified `.py` files. Load individual files as needed.
 ### references/viper-language.md
 Viper intermediate language reference. Load this when inspecting the encoded Viper. It documents the syntax, permissions, and constructs that appear in that output.
 <!-- end -->
-
-### Upstream documentation
-
-Official Nagini wiki: <https://github.com/marcoeilers/nagini/wiki>. **Use only as a fallback** — consult the references above first. Reach for the wiki only if a topic is unclear or missing.
 <!-- end -->

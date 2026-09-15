@@ -217,11 +217,9 @@ Worked payload reads — a fact failure and a permission failure — are in `ref
 ### Integers that are not exactly `int`
 
 <!-- if errors -->
-The signature is `(incomplete quantifiers)` on a fact that is *numerically obvious* over ints — 
-<!-- else -->
-The failing fact is *numerically obvious* over ints — 
+The signature is `(incomplete quantifiers)`.
 <!-- end -->
-`PSeq(y) == PSeq(x)` from `y == x`, a `f(y)` fact not transferring to `f(x)` for `@Pure` `f`, `x in s` from `1 in s and x == 1`, a goal embedding `(1 if v == x else 0)`. The cause is that `x` is not known to be exactly `int` (the static type admits subclasses such as `bool`), so `==` gives value equality but not the object identity these positions need — semantics and failing shapes in the `nagini-language` reference, Integers → Typing.
+The failing fact is *numerically obvious* over ints — `PSeq(y) == PSeq(x)` from `y == x`, a `f(y)` fact not transferring to `f(x)` for `@Pure` `f`, `x in s` from `1 in s and x == 1`, a goal embedding `(1 if v == x else 0)`. The cause is that `x` is not known to be exactly `int` (the static type admits subclasses such as `bool`), so `==` gives value equality but not the object identity these positions need — semantics and failing shapes in the `nagini-language` reference, Integers → Typing.
 
 The fix: ensure the type of the variables involved is exactly `int`, excluding subtypes, via **`type(x) == int`**. State it where you state any other fact about `x`, and carry it along like a permission.
 
@@ -239,11 +237,9 @@ If no `type(x) == int` fact can be carried to a use site (e.g. an element read f
 ### Nonlinear arithmetic
 
 <!-- if errors -->
-The signature is `(incomplete (theory arithmetic))`, with products, `//` or `%` of variables in `failedAssertion`.
-<!-- else -->
-The goal involves products, `//` or `%` of variables.
+The signature is `(incomplete (theory arithmetic))`.
 <!-- end -->
-More time never helps. Restate the proof with stepping stones that avoid division and modulo of products entirely: the Euclid identity (`a == (a // d) * d + a % d`), pure polynomial identities (products may appear; the solver normalizes them), and the bounded-multiple inference (`0 <= m * d < d` implies `m == 0`). `(k * d) // d == k` and `(k * d) % d == 0` are not directly provable; derive them through that chain.
+The goal involves products, `//` or `%` of variables. More time never helps. Restate the proof with stepping stones that avoid division and modulo of products entirely: the Euclid identity (`a == (a // d) * d + a % d`), pure polynomial identities (products may appear; the solver normalizes them), and the bounded-multiple inference (`0 <= m * d < d` implies `m == 0`). `(k * d) // d == k` and `(k * d) % d == 0` are not directly provable; derive them through that chain.
 
 ## Minimal reproduction
 

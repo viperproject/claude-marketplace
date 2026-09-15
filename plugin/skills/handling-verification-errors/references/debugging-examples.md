@@ -164,10 +164,9 @@ Postcondition of list_sum might not hold. Assertion Result() == seq_sum(ToSeq(a)
 ### Diagnosis
 
 **Read the diagnostic**: The verifier can't prove `total == seq_sum(ToSeq(a))` at the return point, after the loop.
-<!-- if errors -->
-In the `debug` payload this shows as `state.store` binding `total` to a fresh symbol version after the loop — the havoc signature of a variable modified in the loop but unconstrained by its invariant.
-<!-- else -->
 The value of `total` after the loop is whatever the invariant says about it — a variable modified in the loop but unconstrained by its invariant is unknown afterwards.
+<!-- if errors -->
+In the `debug` payload this shows as `state.store` binding `total` to a fresh symbol version after the loop, the havoc signature.
 <!-- end -->
 
 **Reason about the gap**: This requires understanding how the verifier reasons about loops. After a loop completes, the verifier *only* knows:

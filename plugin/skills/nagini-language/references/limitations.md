@@ -2,7 +2,7 @@
 
 Things that Nagini genuinely cannot do. Nagini and Viper are more expressive than you might assume — before concluding that a property cannot be expressed or that a workaround is needed, check this list.
 
-**If you believe Nagini cannot express something and it is not listed here, assume you are wrong.** Try the direct encoding first. Only treat it as a real limitation once you have a concrete error demonstrating it.
+Anything not listed here is expressible until a concrete error shows otherwise: try the direct encoding first, and treat something as a limitation only once you hold the error that demonstrates it.
 
 The reverse does not hold for performance limitations. An entry that says "times out" or "expensive" describes behavior at realistic scale; a small snippet that passes quickly does not refute it and is not a license to use the construct. Follow the entry's workaround anyway.
 
