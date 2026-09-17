@@ -196,6 +196,7 @@ def length(lst: MyList) -> int:
 - Must return a value
 - Can use `Unfolding` to access predicate contents
 - Can be recursive — use `Decreases(measure)` for termination (see Termination section)
+- Only need *some* permission to what they read: in a pure function's precondition the amount is irrelevant, `Requires(Acc(x.f))` and `Requires(Acc(x.f, 1/2))` mean the same, and a caller holding any positive fraction may call it
 - Called in specifications by normal function call syntax
 
 **Do not self-reference in postconditions.** A pure function's `Ensures` clause may *not* call the function itself in a postcondition.
@@ -271,7 +272,6 @@ Forall(int, lambda i: (
 ))
 ```
 
-<!-- if knowledge -->
 #### Triggers
 Every `Forall` should provide an explicit trigger. A trigger is a list of terms (inside `[[...]]`) mentioning all bound variables; the quantifier fires whenever matching terms appear in the proof context.
 
@@ -341,7 +341,6 @@ def streams_injective(streams: Dict[int, Stream]) -> bool:
                 streams[k1] is not streams[k2]),
         [[streams[k1], streams[k2]]]))
 ```
-<!-- end -->
 
 ## Ghost Code
 
@@ -357,7 +356,6 @@ A Nagini program has two layers: the regular Python program, and ghost code that
 
 Ghost code must provably terminate: a `@Ghost` method needs `Requires(MustTerminate(measure))` (see Termination), a `@Ghost @Pure` function proves termination via `Decreases`.
 
-<!-- if knowledge -->
 ### Ghost types
 
 The P-collections (`PSeq`, `PByteSeq`, `PSet`, `PMultiset`) and the ghost primitives `GInt`, `GFloat`, `GBool`, `GStr`, `GComplex` are ghost types. `MarkGhost` declares a ghost alias of your own:
@@ -392,16 +390,26 @@ def counted_sum(l: List[int]) -> Tuple[int, GIdx]:
 
 ### `@Ghost` functions and classes
 
-`@Ghost` marks a whole def (or class) as ghost. A def whose result depends on ghost inputs must be ghost, since a regular result may not depend on a ghost value: a `@Pure` function over a `PSeq` is `@Ghost @Pure`, a lemma over ghost values is `@Ghost` with `MustTerminate`. A bare call to a `@Ghost` function in a regular body is a ghost statement.
+`@Ghost` marks a whole def (or class) as ghost. A def whose result depends on ghost inputs must be ghost, since a regular result may not depend on a ghost value: a `@Pure` function over a `PSeq` is `@Ghost @Pure`, as is one whose body uses a specification construct (`Forall`, `Implies`, `Old`) even over regular arguments, a lemma over ghost values is `@Ghost` with `MustTerminate`. A bare call to a `@Ghost` function in a regular body is a ghost statement.
+
+### Ghost expressions and control-flow
+
+An expression is ghost as soon as it mentions a ghost value. An `if` or `while` whose condition is ghost is a ghost statement together with everything inside it. Its body may then hold ghost statements only: a regular assignment inside it is rejected.
+
+### Rules for ghost code
+- Ghost code must not `return`, `break`, `continue` or `raise`, and must not use `try` or `with`: that would change the regular control flow.
+- Ghost code must not call an impure method on a ghost receiver, since erasing the call would erase its effect. `@Pure` calls are fine and yield a ghost value.
+- A plain `assert` runs at runtime and must not mention ghost state. Use `Assert`.
+- A `@Ghost` class inherits only from `@Ghost` classes, a regular class only from regular ones.
+- Several regular or several ghost return values are grouped into a nested tuple (`Tuple[Tuple[int, bool], GInt]`), and the caller unpacks the result immediately into regular and ghost targets.
 
 ### What is not ghost
 
-- Every control-flow statement. An `if`, `while`, `for`, `with` or `try` is not ghost even if its body is entirely ghost.
+- A control-flow statement over a regular condition, and every `for`, `with` and `try`.
 - A plain `@Pure` function: regular code, only the decorator is ghost.
 - A call assigned to ghost targets: the targets are ghost, the call is not.
 
-So a proof over regular code may add ghost code anywhere, including ghost locals naming side-effect-free expressions (a field read, a `@Pure` call), but should not add a branch, a loop, a regular local, or a ghost local holding the result of a regular call.
-<!-- end -->
+So a proof over regular code may add ghost code anywhere, including ghost locals naming side-effect-free expressions (a field read, a `@Pure` call) and branches or loops over ghost conditions, but should not add a branch or loop over a regular condition, a regular local, or a ghost local holding the result of a regular call.
 
 ## Containers
 
@@ -458,7 +466,6 @@ Same constructor rules as `PSeq`: the varargs form is usable inline in specs; fo
 
 There is no `.count` and no `x in m` for multisets, check membership with `m.num(x) > 0`.
 
-
 ### Python containers
 
 Python lists, dicts and sets are heap objects. Accessing them requires permissions, which are expressed with built-in predicates:
@@ -481,7 +488,6 @@ As opposed to user-defined predicates, the built-in predicates do not require fo
 | `Dict[K, V]` | `ToSeq(d)`: `PSeq[K]` | the keys, as for a set; the values are `d[k]` |
 
 `ToMS()` is the multiset view of a `PSeq`.
-<!-- if knowledge -->
 ### Membership
 
 `x in c` means different things per container. In a list or `PSeq` it holds when some element is `==` to `x`. In a set, dict or `PSet` it holds when `x` itself is an element (or key), by object identity. So `x in s` and `x in ToSet(s)` are the same fact, while for an arbitrary `int` `x in ToSeq(s)` does not give `x in s`: `x` may be a different object with the same value.
@@ -497,7 +503,6 @@ xs.append(x)   # ToSeq(xs) == Old(ToSeq(xs)) + PSeq(x)
 s.add(x)       # ToSet(s) == Old(ToSet(s)) + PSet(x)
 d[k] = v       # ToSet(d) == Old(ToSet(d)) + PSet(k) and d[k] == v
 ```
-<!-- end -->
 
 ## Built-in Functions with Verified Contracts
 
@@ -511,8 +516,6 @@ Nagini ships verified contracts for many Python built-ins, usable directly in sp
 | `x in xs` (`List`, `PSeq`, `PSet`) | custom `contains(xs, x)`, existential over indices |
 | `xs[i]`, `xs.take(n)`, `xs.drop(n)`, `xs + ys` (`PSeq`) | manual sequence rebuild via recursion |
 
-
-<!-- if knowledge -->
 ## Integers
 
 ### Typing
@@ -550,7 +553,6 @@ def h(x: int, y: int) -> None:
 ```python
 MASK64 = 0xFFFFFFFFFFFFFFFF  # == 2**64 - 1; written as `2**64 - 1` it stays an opaque term
 ```
-<!-- end -->
 
 ## Loops
 
@@ -572,8 +574,6 @@ while i < n:
     i += 1
 ```
 
-
-<!-- if knowledge -->
 ### `for` loops
 If at all possible, prefer `while` loops over `for` loops. Write `while i < len(xs)` for a list, a range, or anything else that has an index, even where a `for` loop reads more naturally. Use a `for` loop only for a container without an index.
 
@@ -582,7 +582,6 @@ If at all possible, prefer `while` loops over `for` loops. Write `while i < len(
 `x` is assigned only when `c` is non-empty: guard invariants about it with `Implies(len(c) > 0, ...)`.
 
 `Previous(x)` is the `PSeq` of the values `x` took in the completed iterations. Be careful with it, use of `y in Previous(x)` inside a quantifier can make the verifier diverge.
-<!-- end -->
 
 ## Termination
 
@@ -614,7 +613,6 @@ def factorial(n: int) -> int:
 
 Decreases clauses can also contain a boolean *condition* (`Decreases(measure, condition)` as second argument. The measure is only checked when the condition holds). The condition is a guard, not a second measure component — there is no lexicographic tuple form.
 
-
 Every `@Pure` function called from a function with a `Decreases` needs to prove termination as well. A non-recursive function (which terminates trivially) needs to be annotated with `Decreases(1)`.
 
 For a `@Pure` function recursing over a heap predicate, the measure can be the predicate instance. The recursive call must then sit inside an `Unfolding` of that same instance. If the predicate guards its recursion (e.g. `Implies(l.next is not None, MyList(l.next))`), guard the call with the same condition. The parameter must not be `Optional`: if the recursive call can pass `None`, the callee's measure predicate does not exist and the termination check fails.
@@ -636,9 +634,7 @@ def quicksort(arr: List[int]) -> List[int]:
 ```
 
 Every call in the body must have a measure strictly below the caller's. Builtin calls count and usually have measure 1.
-<!-- if knowledge -->
 It is better to leave a good amount of headroom in the measure, so that adding calls later on does not break the termination proof. 
-<!-- end -->
 
 A loop inside a `MustTerminate` method must carry its own termination invariant:
 
@@ -669,7 +665,6 @@ Assert(x > 0)          # Checked by verifier (fails if unprovable)
 ```python
 Ensures(Let(x + 1, bool, lambda v: v > 0 and v < 100))
 ```
-<!-- if knowledge -->
 ## Exception Contracts
 
 ### Exsures
@@ -726,7 +721,6 @@ def bump() -> None:
 Once any function in the module reassigns the global, even reads require `Acc(<name>)` in the contract — `get` as written above fails alongside a writer like `bump` below.
 
 For shared reads, split the permission into fractions and wrap it in a `@Predicate` (e.g. `Acc(a, 1/2)`), `Fold` it at module scope, and have functions require/ensure the predicate — same pattern as fractional field permissions.
-
 
 ## Threads
 
@@ -788,4 +782,3 @@ Invariant(Forall(int, lambda j: (
 ```
 
 `Joinable(threads[j])` **alone** as the sole body of a `Forall` also works — the bug is specifically its use in a conjunction.
-<!-- end -->
