@@ -298,7 +298,7 @@ Forall(int, lambda i: (
 
 #### Quantifying over a collection
 
-The first argument to `Forall` does not have to be a type — it can also be a collection value (a `list`, `set`, `dict`, `PSeq` or `PSet`), in which case the bound variable ranges over the *elements* (or keys) of that collection, rather than over all values of a type. The element-form quantifier avoids the `0 <= i < len(xs)` guard and triggers on element-level expressions.
+The first argument to `Forall` does not have to be a type — it can also be a collection value (a `list`, `set`, `dict`, `PSeq` or `PSet`), in which case the bound variable ranges over the *elements* (or keys) of that collection by reference, rather than over all values of a type. The element-form quantifier avoids the `0 <= i < len(xs)` guard and triggers on element-level expressions.
 
 ```python
 xs: List[int] = ...
