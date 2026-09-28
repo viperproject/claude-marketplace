@@ -17,7 +17,7 @@ The verifier is reasonably powerful: it should practically always be possible to
 Understand the failure before fixing it: every fix responds to evidence gathered by the strategies below.
 
 - **Probe asserts** — reduce the error to a single failing assertion and measure which facts the solver can derive around it.
-<!-- if errors -->
+<!-- if feedback -->
 - **Read the payload** — why and where the solver stopped, which quantified facts were in reach, which permissions the path held.
 <!-- end -->
 - **Minimal reproduction** — capture the missing step in a self-contained candidate file and attack it in isolation.
@@ -49,7 +49,7 @@ Often the probes themselves are the fix. A few well-placed `Assert(...)` stateme
 
 To pick candidate intermediate facts to probe with, use the patterns below. You can use multiple strategies at once.
 
-<!-- if errors -->
+<!-- if feedback -->
 **Explicit failing SMT-queries**: the `failedAssertion` term is the obligation the solver could not prove. Translate it back to Python and assert it before the failing point.
  
 **Trigger check**: when `reasonUnknown` is `(incomplete quantifiers)`, find the fact you are counting on in `quantifiers` (or `assumptions`) and compare its `triggers` with the terms of `failedAssertion`. No matching term means the fact can never fire here, whatever the budget: probe with an `Assert` that mentions the trigger's terms, or state the instance you need as a ground fact.
@@ -120,11 +120,11 @@ When a fold fails, assert each component of the predicate body separately (witho
 3. List permissions **needed** (postconditions, remaining folds)
 4. Check: acquired - consumed >= needed?
 
-<!-- if errors -->
+<!-- if feedback -->
 `state.heap` at the failure already gives you the acquired-minus-consumed inventory for free; trace manually to find *which statement* along the path consumed a chunk the heap read showed missing.
 <!-- end -->
 
-<!-- if errors -->
+<!-- if feedback -->
 ## What the verifier reports
 
 A verification failure is Silicon giving up on one prover query, or finding one permission chunk missing, on one symbolic path. The diagnostic's `message` and `reason` name the Python construct; the `debug` payload is what Silicon held at that moment, in its term language. It answers questions probing cannot: whether a query ran at all, why the solver stopped, which quantified facts were in reach, which permissions the path held.
@@ -136,20 +136,14 @@ A verification failure is Silicon giving up on one prover query, or finding one 
 | `failedAssertion` | The goal term the prover was asked to prove, as encoded: a boolean term for a fact, a permission expression for a chunk | Which obligation this is among a conjunction, which variable versions it is about, and which encoded operator or function it goes through — possibly a different one than the Python source suggests |
 | `failingCheck` | The prover query that produced the failure: `kind` (`assert` for a proof obligation, `check` for a query Silicon asks while executing), `answer`, wall `ms`, `budgetMs`, and Z3's `instantiations` during the query | If this field is  absent then no SMT-query ran, the error was produced in Silicon directly, e.g. for a chunk that was not in the heap at all. A small `instantiations` count means the quantifier machinery barely engaged; a very large one, that it ran away |
 | `reasonUnknown` | Z3's own reason for answering unknown | The class of the failure. |
-<!-- if timeouts -->
 | `rlimitDelta` | Prover resources the query consumed, in Z3 rlimit units; the cap is `assertTimeout` ms × 9000 | At the cap: the budget ended the query. Well below it: the solver stopped by itself, and more budget will not change the answer. Wall `ms` can exceed `budgetMs` either way — the budget is enforced as rlimit, not time |
-<!-- else -->
-| `rlimitDelta` | Prover resources the query consumed, in Z3 rlimit units | The cost of this one query. Compared across probes it shows whether a change made the query cheaper; a delta that grows with every added fact is a query drowning in context |
-<!-- end -->
 
 What each `reasonUnknown` value means:
 
 | Value | What happened | More time | The fact may still hold |
 |---|---|---|---|
 | `(incomplete quantifiers)` | The solver stopped inside its budget with the goal open: every instantiation it tried still left a model in which the goal is false. Its heuristics found no way from the facts to the goal — either no fact bridges the gap, or the bridging quantifier never fired on the terms present | never helps | yes: the state may entail it and the solver never derived it — or may not entail it at all. The payload does not distinguish the two; probes do |
-<!-- if timeouts -->
 | `canceled`, `unknown` | The budget ended the query while the solver was still working; `unknown` is the same event without a reason string. `rlimitDelta` is at the cap | may help, up to a point: a query that closes within ~10x the budget was merely slow; one that scales with any budget is a matching loop or an instantiation explosion (a large `instantiations` count), a performance problem for the `nagini-performance` skill | unknown |
-<!-- end -->
 | `(incomplete (theory arithmetic))` | The goal needs nonlinear integer reasoning — products, `//`, `%` of variables — which the solver does not decide | never helps | yes, by a different proof |
 
 ### The state
@@ -216,7 +210,7 @@ Worked payload reads — a fact failure and a permission failure — are in `ref
 
 ### Integers that are not exactly `int`
 
-<!-- if errors -->
+<!-- if feedback -->
 The signature is `(incomplete quantifiers)`.
 <!-- end -->
 The failing fact is *numerically obvious* over ints — `PSeq(y) == PSeq(x)` from `y == x`, a `f(y)` fact not transferring to `f(x)` for `@Pure` `f`, `x in s` from `1 in s and x == 1`, a goal embedding `(1 if v == x else 0)`. The cause is that `x` is not known to be exactly `int` (the static type admits subclasses such as `bool`), so `==` gives value equality but not the object identity these positions need — semantics and failing shapes in the `nagini-language` reference, Integers → Typing.
@@ -236,7 +230,7 @@ If no `type(x) == int` fact can be carried to a use site (e.g. an element read f
 
 ### Nonlinear arithmetic
 
-<!-- if errors -->
+<!-- if feedback -->
 The signature is `(incomplete (theory arithmetic))`.
 <!-- end -->
 The goal involves products, `//` or `%` of variables. More time never helps. Restate the proof with stepping stones that avoid division and modulo of products entirely: the Euclid identity (`a == (a // d) * d + a % d`), pure polynomial identities (products may appear; the solver normalizes them), and the bounded-multiple inference (`0 <= m * d < d` implies `m == 0`). `(k * d) // d == k` and `(k * d) % d == 0` are not directly provable; derive them through that chain.
@@ -267,7 +261,7 @@ def lemma_property_name(params: Type) -> bool:
 - **Preconditions:** a selection of passing asserts in the original method at or before the failure site — if you want to use a fact that isn't yet asserted there, go assert it in the original first; if the assert passes, you may include it, if it fails, the fact does not actually hold there and is not a valid precondition. Pick the **minimal** subset of those passing asserts that you believe should suffice.
 - **Body:** `pass`.
 2. **Verify the candidate.** Make it verify without editing the original source:
-<!-- if errors -->
+<!-- if feedback -->
 probe asserts and interrogation apply to the candidate exactly as to the original.
 <!-- else -->
 probe asserts apply to the candidate exactly as to the original.
@@ -319,7 +313,7 @@ Why it works: the body is unrolled once, this contains the recursive application
 ## Dead ends
 Report a dead end only once the strategies above are exhausted and no longer produce new evidence about the failure.
 
-<!-- if errors -->
+<!-- if feedback -->
 Demonstrate it with a minimal snippet pair: the minimal failing shape and all the collected evidence about what fails on which layer (encoding, SMT) and why.
 <!-- else -->
 Demonstrate it with a minimal snippet pair: the minimal failing shape and all the collected evidence about what fails and why.
@@ -330,7 +324,7 @@ Recommend whether the spec needs redesign, whether a proof technique is needed, 
 # Resources
 
 ## references/debugging-examples.md
-<!-- if errors -->
+<!-- if feedback -->
 Worked debugging examples: two payload reads (a fact failure and a permission failure) and three full diagnose-probe-fix arcs in Nagini/Python syntax — permission leak in loop, weak loop invariant, and bridging index-based to value-based sequence reasoning with an inductive lemma pair.
 <!-- else -->
 Worked debugging examples: three full diagnose-probe-fix arcs in Nagini/Python syntax — permission leak in loop, weak loop invariant, and bridging index-based to value-based sequence reasoning with an inductive lemma pair.
@@ -355,7 +349,7 @@ Quick-reference for mapping a verification error or symptom to its likely cause 
 | Loop invariant not preserved (fails at end of body) | Missing update in loop body; inductive step needs a lemma | Strengthen invariant or fix loop body | Strengthen or weaken invariant; add `Fold`/`Unfold` inside loop body |
 | "Precondition might not hold" / call might fail | Caller doesn't establish what the callee requires | Establish the missing precondition before the call | Same |
 | Method verifies but caller fails | Postcondition too weak — caller needs a guarantee the method doesn't provide | Strengthen postcondition | Same |
-<!-- if errors -->
+<!-- if feedback -->
 | Fact about a field/container provable before a call, unprovable after it (`state.store` shows the value re-assigned across the call) | Callee's `Ensures` re-grants permission to the location without stating value/content preservation — the call havocs it | Add the frame condition to the callee's `Ensures` (e.g. `ToSeq(x.xs) == Old(ToSeq(x.xs))`) | Report as a contract weakness — a missing frame condition cannot be recovered caller-side |
 <!-- else -->
 | Fact about a field/container provable before a call, unprovable after it | Callee's `Ensures` re-grants permission to the location without stating value/content preservation — the call havocs it | Add the frame condition to the callee's `Ensures` (e.g. `ToSeq(x.xs) == Old(ToSeq(x.xs))`) | Report as a contract weakness — a missing frame condition cannot be recovered caller-side |

@@ -60,7 +60,7 @@ Fold might fail. There might be insufficient permission to access Acc(node.value
 ### Diagnosis
 
 **Read the diagnostic**: The verifier cannot fold `lseg(head)` because it can't find `Acc(head.value)`. Folding `lseg(head)` requires its body: `Acc(head.value)`, `Acc(head.next)`, and `lseg(head.next)`.
-<!-- if errors -->
+<!-- if feedback -->
 For this failure class the `debug` payload answers directly: `state.heap` lists what the path holds at the failure, and a chunk present in `state.oldHeaps['old']` but absent from `state.heap` means it was consumed along the path.
 <!-- end -->
 
@@ -165,7 +165,7 @@ Postcondition of list_sum might not hold. Assertion Result() == seq_sum(ToSeq(a)
 
 **Read the diagnostic**: The verifier can't prove `total == seq_sum(ToSeq(a))` at the return point, after the loop.
 The value of `total` after the loop is whatever the invariant says about it — a variable modified in the loop but unconstrained by its invariant is unknown afterwards.
-<!-- if errors -->
+<!-- if feedback -->
 In the `debug` payload this shows as `state.store` binding `total` to a fresh symbol version after the loop, the havoc signature.
 <!-- end -->
 
@@ -287,7 +287,7 @@ With these lemmas, the call site becomes straightforward — the loop's index-ba
 seq_not_contains(old_seq, x)  # Now verifies
 ```
 
-<!-- if errors -->
+<!-- if feedback -->
 ---
 
 ## Example: Reading a Fact-Failure Payload

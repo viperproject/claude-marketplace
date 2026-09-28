@@ -10,7 +10,7 @@ Verification time ≈ number of symbolic execution paths × cost per SMT query. 
 Contract and vocabulary shapes determine this cost before any proof is written, and proof effort cannot recover a cheap shape from an expensive one. The fix catalog therefore serves both phases:
 - at design time, pick the cheap shape;
 - at repair time, diagnose which resource is exhausted (Diagnosis)
-<!-- if timeouts -->
+<!-- if feedback -->
 - spend budget only within the allowed probes (Raising budgets)
 <!-- end -->
 - restructure toward the cheap shape (the catalog).
@@ -23,7 +23,7 @@ The vocabulary of a project is the biggest lever for performance. The `@Contract
 
 ## Diagnosis
 
-<!-- if errors -->
+<!-- if feedback -->
 *Encoding or proving?* `timings` gives the seconds per pipeline phase. If `translate` or `chop` dominates `verify`, the cause is encoding: shrink or split the member.
 
 *Whole-run Timeouts* A `TimeoutOccurred` diagnostic's `debug` payload carries `inFlight` (member, source line, kind and running time of each unfinished check), `slowestChecks` (the longest completed checks with their line, answer, reason and instantiation count) and `memberCheckTotals` (checks and milliseconds per member). One long in-flight or slow check is a single expensive query at that line: context or instantiation. Many short checks adding up in `memberCheckTotals` is a path explosion. Confirm with an `Assert(False)` before the named line: the run should then complete quickly.
@@ -32,16 +32,12 @@ The vocabulary of a project is the biggest lever for performance. The `@Contract
 <!-- end -->
 
 *Separating paths from context*:
-<!-- if timeouts -->
+<!-- if feedback -->
 - Whole-run vs. assert timeout: If the assert timeout is set low, then a `TimeoutOccurred` for the whole run means the problem is almost certainly paths, whereas a single budget-bound check means one expensive query, so context or instantiation.
-<!-- if errors -->
 - A budget-bound check shows `reasonUnknown` `canceled` or `unknown` with `rlimitDelta` at the cap.
-<!-- else -->
-- A located error that disappears under a raised `--assertTimeout` probe was a budget-bound check.
-<!-- end -->
 <!-- end -->
 
-<!-- if errors -->
+<!-- if feedback -->
 - `reasonUnknown` `(incomplete quantifiers)` means the query did not close for lack of a fact: a debugging problem, not a performance one.
 <!-- end -->
 - You can also probe this with two `viper_args` (add `--disableCaching` so the cached result is not served back):
@@ -49,7 +45,7 @@ The vocabulary of a project is the biggest lever for performance. The `@Contract
    - `--exhaleMode 0` (greedy heap reasoning) passes now → heap context.
    - neither passes → unclear.
 
-<!-- if timeouts -->
+<!-- if feedback -->
 ## Raising budgets
 Raised budgets are probes, not fixes. On a whole-run timeout, a single 2x `--timeout` re-run is a fair probe; beyond 2x more budget rarely helps. For a single budget-bound check, up to 10x the default `assertTimeout` is an acceptable fix if the check closes within it. Beyond these limits, try to decompose rather than re-budgeting.
 

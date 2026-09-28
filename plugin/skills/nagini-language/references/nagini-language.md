@@ -277,7 +277,7 @@ Every `Forall` should provide an explicit trigger. A trigger is a list of terms 
 
 - Every quantifier needs a trigger; nested quantifiers each need one (not just the innermost).
 - For an empty trigger list `[]` , Nagini supplies its own trigger. These are both incomplete and quite broad, so you should always provide your own.
-<!-- if errors -->
+<!-- if feedback -->
 - `debug.viperExcerpt` on a failing diagnostic shows the trigger each quantifier ended up with.
 <!-- end -->
 - Each quantified variable must appear in at least one trigger expression.
