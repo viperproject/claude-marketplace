@@ -55,7 +55,7 @@ Raised budgets are probes, not fixes. On a whole-run timeout, a single 2x `--tim
 
 Try to keep escalations temporary: after the change it motivated, apply the fix catalog until the standard budgets carry it again. A member that can only iterate under escalated budgets will drag the rest of the verification down permanently: every later check of that member, and every verification of the module around it, runs slower from then on. Early in a program, while its shape can still change cheaply, restructuring is almost always the better trade. 
 
-Only for a very large program (for example more than 1,000 lines amd spec), it may be necessary to leave members above the defaults after the fix catalog has been applied. There, a member that then verifies within 2x `--timeout` and 100x `assertTimeout` may stay at those budgets: record which members and which budgets in the log.
+Only for a very large or complex programs (for example more than 1,000 lines of code and spec), it may be necessary to leave members above the defaults after the fix catalog has been applied. There, a member that then verifies within 2x `--timeout` and 100x `assertTimeout` may stay at those budgets: record which members and which budgets in the log.
 <!-- end -->
 
 ## The fix catalog
