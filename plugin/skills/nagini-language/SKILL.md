@@ -13,11 +13,10 @@ Three companion skills carry the methodology: load `handling-verification-errors
 ## Verification tools
 
 Verification runs through the `nagini` MCP server.
-If a `mcp__nagini__` tool call fails with "No such tool available", load the tools with `ToolSearch("select:mcp__nagini__verify_method,mcp__nagini__verify_snippet,mcp__nagini__verify_file,mcp__nagini__cancel,mcp__nagini__flush_cache")` and retry. If the tools are still unavailable, do not fall back to the `nagini` CLI: diagnose with the plugin README.md and walk the user through the fix. The server spawns once at Claude Code startup with its launch environment, so most fixes require restarting Claude Code.
+If a `mcp__nagini__` tool call fails with "No such tool available", load the tools with `ToolSearch("select:mcp__nagini__verify_method,mcp__nagini__verify_snippet,mcp__nagini__cancel,mcp__nagini__flush_cache")` and retry. If the tools are still unavailable, do not fall back to the `nagini` CLI: diagnose with the plugin README.md and walk the user through the fix. The server spawns once at Claude Code startup with its launch environment, so most fixes require restarting Claude Code.
 
-- `mcp__nagini__verify_method(path, methods)` — the primary tool. `path` must be absolute. `methods` is a list of member names: a bare function name, `ClassName.method_name`, or `ClassName` (all its methods). Verify only what you are working on: the one method while iterating on it, and when several methods need (re-)checking, pass them as one list in a single call.
+- `mcp__nagini__verify_method(path, methods)` — the verification tool. `path` must be absolute. `methods` is a list of member names: a bare function name, `ClassName.method_name`, or `ClassName` (all its methods). Verify only what you are working on: the one method while iterating on it, and when several methods need (re-)checking, pass them as one list in a single call. Do not verify every member of a large module at once while working: such a run carries the whole module's context and costs far more than its members one by one.
 - `mcp__nagini__verify_snippet(code)` — verify inline code without creating a file.
-- `mcp__nagini__verify_file(path)` — verify a whole file; on a small file the simpler equivalent of listing every member. Once a whole-file run takes more than a couple of minutes, it is better to verify the changed members and their dependents instead. An optional `methods` list restricts it like `verify_method`, `base_dir` sets the package root for intra-package imports, and `ignore_global` skips top-level statements. With `translate_only: true` it is the standard well-formedness check for a file (e.g. a test file before verification).
 
 Optional parameters on all verify tools:
 
@@ -35,7 +34,7 @@ SMT-state collection (`--smtStateOnError`) is among them: every verification fai
 
 `mcp__nagini__inspect(recorded_at, diagnostic, fields)` reads a diagnostic's archived payload without re-verifying: `recorded_at` is the verify result's `recordedAt`, `diagnostic` the index into its `diagnostics`. Without `fields` it lists what is archived with sizes; with `fields` (e.g. `["assumptions", "state.heap"]`) it returns them, list fields as their newest `last` entries, filtered to those containing `contains` when given.
 <!-- end -->
-- `translate_only: true` — stop after translation (mypy + Nagini-to-Viper); nothing is verified.
+- `translate_only: true` — stop after translation (mypy + Nagini-to-Viper); nothing is verified. The standard well-formedness check for a file, e.g. a test file before verification.
 
 Result shape:
 ```json

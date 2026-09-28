@@ -51,9 +51,11 @@ The vocabulary of a project is the biggest lever for performance. The `@Contract
 
 <!-- if timeouts -->
 ## Raising budgets
-Raised budgets are probes, not fixes. On a whole-run timeout, a single 2x `--timeout` re-run is a fair probe; beyond 2x more budget rarely helps — decompose rather than re-budget. For a single budget-bound check, up to 10x the default `assertTimeout` is an acceptable fix if the check closes within it; beyond 10x, restructure rather than re-budget.
+Raised budgets are probes, not fixes. On a whole-run timeout, a single 2x `--timeout` re-run is a fair probe; beyond 2x more budget rarely helps. For a single budget-bound check, up to 10x the default `assertTimeout` is an acceptable fix if the check closes within it. Beyond these limits, try to decompose rather than re-budgeting.
 
-Every escalation is temporary: after the change it motivated, turn the budget back down and re-verify at the standard limits. A member that can only iterate under escalated budgets will drag the rest of the verification down permanently. Apply the fix catalog until the standard budgets carry it again.
+Try to keep escalations temporary: after the change it motivated, apply the fix catalog until the standard budgets carry it again. A member that can only iterate under escalated budgets will drag the rest of the verification down permanently: every later check of that member, and every verification of the module around it, runs slower from then on. Early in a program, while its shape can still change cheaply, restructuring is almost always the better trade. 
+
+Only for a very large program (for example more than 1,000 lines amd spec), it may be necessary to leave members above the defaults after the fix catalog has been applied. There, a member that then verifies within 2x `--timeout` and 100x `assertTimeout` may stay at those budgets: record which members and which budgets in the log.
 <!-- end -->
 
 ## The fix catalog
