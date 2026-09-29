@@ -17,7 +17,7 @@ Contract and vocabulary shapes determine this cost before any proof is written, 
 
 ## What healthy looks like
 
-A single-member verification takes seconds to low tens of seconds; contract-only stubs, predicates and small pure functions a few seconds. A member that takes minutes is an outlier with a structural cause, not "a big function" — and slow verification is usually many cheap queries (paths × obligations), not a few hard ones. Slow predicates and small pure functions are frequently the real culprit behind a slow method, because their cost is paid again at every unfold or call site: look there before tuning the method.
+A single-member verification takes seconds to low tens of seconds; contract-only stubs, predicates and small pure functions a few seconds. A stub, predicate or pure function that takes minutes is an outlier with a structural cause. A complex method body with many paths can legitimately take minutes. Slow verification is usually many cheap queries (paths × obligations), not a few hard ones. Slow predicates and small pure functions are frequently the real culprit behind a slow method, because their cost is paid again at every unfold or call site: look there before tuning the method.
 
 The vocabulary of a project is the biggest lever for performance. The `@ContractOnly` stubs, predicates and `@Pure` functions need to verify quickly, because they are used everywhere. If verification of these primitives takes longer than a few seconds, verification will likely fail. Fixing the vocabulary should always be the first priority, never carry an expensive vocabulary forward on the promise that proof effort will cope.
 
