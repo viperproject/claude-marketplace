@@ -196,7 +196,7 @@ def length(lst: MyList) -> int:
 - Must return a value
 - Can use `Unfolding` to access predicate contents
 - Can be recursive — use `Decreases(measure)` for termination (see Termination section)
-- Only need *some* permission to what they read: in a pure function's precondition the amount is irrelevant, `Requires(Acc(x.f))` and `Requires(Acc(x.f, 1/2))` mean the same, and a caller holding any positive fraction may call it
+- All permissions in preconditions are converted to an arbitrary small read permission, so for example `Requires(Acc(x.f))` and `Requires(Acc(x.f, 1/2))` mean the same, and a caller holding any positive fraction may call it. This also means that aliasing is not ruled out by full permissions.
 - Called in specifications by normal function call syntax
 
 **Do not self-reference in postconditions.** A pure function's `Ensures` clause may *not* call the function itself in a postcondition.
@@ -487,7 +487,8 @@ As opposed to user-defined predicates, the built-in predicates do not require fo
 | `Dict[K, V]` | `ToSet(d)`: `PSet[K]` | the keys |
 | `Dict[K, V]` | `ToSeq(d)`: `PSeq[K]` | the keys, as for a set; the values are `d[k]` |
 
-`ToMS()` is the multiset view of a `PSeq`.
+`ToMS()` is the multiset view of a `PSeq`. It is defined only through how the sequence is built (empty, singleton, `+`) and its length, not through `in` or indexing: neither `x in s` nor `s[i]` gives `ToMS(s).num(...) > 0` on its own. Derive counts from a sequence you build up, e.g. `ToMS(s + PSeq(x)) == ToMS(s) + PMultiset(x)`.
+
 ### Membership
 
 `x in c` means different things per container. In a list or `PSeq` it holds when some element is `==` to `x`. In a set, dict or `PSet` it holds when `x` itself is an element (or key), by object identity. So `x in s` and `x in ToSet(s)` are the same fact, while for an arbitrary `int` `x in ToSeq(s)` does not give `x in s`: `x` may be a different object with the same value.
@@ -503,6 +504,29 @@ xs.append(x)   # ToSeq(xs) == Old(ToSeq(xs)) + PSeq(x)
 s.add(x)       # ToSet(s) == Old(ToSet(s)) + PSet(x)
 d[k] = v       # ToSet(d) == Old(ToSet(d)) + PSet(k) and d[k] == v
 ```
+
+## Algebraic Data Types
+
+An immutable data type for specifications: a base class deriving from `ADT` and one `NamedTuple` subclass per constructor.
+
+```python
+from typing import NamedTuple, cast
+from nagini_contracts.adt import ADT
+
+class Tree(ADT):
+    pass
+
+class Leaf(Tree, NamedTuple('Leaf', [])):
+    pass
+
+class Node(Tree, NamedTuple('Node', [('val', int), ('left', Tree), ('right', Tree)])):
+    pass
+```
+
+Values need no permissions and compare structurally: `Node(1, Leaf(), Leaf()) == Node(1, Leaf(), Leaf())`. Every value is exactly one constructor (`type(t) is Node`, `isinstance(t, Leaf)`), and a field is read through a cast: `cast(Node, t).left`.
+
+- `@Ghost` on an ADT class is rejected. For ghost use, alias the type and mark the alias: `GTree = Tree; MarkGhost(GTree)`, then annotate ghost variables with `GTree`.
+- `Decreases(t)` is rejected: recursion over an ADT needs an integer measure, e.g. a size stored in each `Node` by a constructor function, recursing only into children of smaller size.
 
 ## Built-in Functions with Verified Contracts
 
