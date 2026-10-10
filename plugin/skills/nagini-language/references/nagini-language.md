@@ -365,6 +365,8 @@ GIdx = int
 MarkGhost(GIdx)
 ```
 
+A ghost alias of a class gives a ghost reference to an existing object: `GNode = Node; MarkGhost(GNode)`, then `start: GNode = x`. The object itself stays ordinary heap state.
+
 A ghost-typed value may appear in contracts and ghost code but not in regular executable code. Assigning one to a non-ghost target is rejected. The reverse direction is fine: regular values may flow into ghost targets.
 
 ### Ghost variables and mixed returns
