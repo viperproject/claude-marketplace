@@ -43,7 +43,7 @@ Result shape:
 ```
 Pass/fail is the `success` field. `translationFailed: true` marks syntax/type/translation errors as opposed to verification failures. `cancelled: true` means the run was stopped by the `cancel` tool or by the whole-run budget; a whole-run timeout is always reported as a `TimeoutOccurred` diagnostic. `crashed: true` means the backend died with an exception, reported in a `verifier.crashed` diagnostic; an identical re-run usually crashes again. `startLine` is 1-indexed. `reasonPosition` is the line and column of the clause the `reason` names, such as the failing postcondition; `[0, 0]` when there is none. `branchConditions` are the branch decisions, as Python conditions with their positions, on the path the failure was found on. `vias` lists intermediate positions the error was routed through.
 <!-- if feedback -->
-With diagnostics on, the result also carries `timings` (seconds per pipeline phase: typecheck, translate, chop, verify) and `recordedAt` (this run's archive directory), and every verification failure a `debug` payload. `include_viper` adds `viperProgram`.
+With diagnostics on, the result also carries `timings` (seconds per pipeline phase: typecheck, translate, chop, verify) and `recordedAt` (this run's archive directory), and every verification failure a `debug` payload. A run a whole-run timeout or a crash ended carries `members` (each member `passed`, `failed`, `inFlight` or `notStarted`) and the errors of the members that failed before it. `include_viper` adds `viperProgram`.
 <!-- end -->
 
 `mcp__nagini__cancel(job_token)` cancels an in-flight verification; `mcp__nagini__flush_cache()` clears the verification result cache.
