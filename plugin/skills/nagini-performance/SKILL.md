@@ -10,8 +10,10 @@ Verification time ≈ number of symbolic execution paths × cost per SMT query. 
 Contract and vocabulary shapes determine this cost before any proof is written, and proof effort cannot recover a cheap shape from an expensive one. The fix catalog therefore serves both phases:
 - at design time, pick the cheap shape;
 - at repair time, diagnose which resource is exhausted (Diagnosis)
-<!-- if feedback -->
+<!-- if diagnostics -->
+<!-- if budgets -->
 - spend budget only within the allowed probes (Raising budgets)
+<!-- end -->
 <!-- end -->
 - restructure toward the cheap shape (the catalog).
 
@@ -23,7 +25,7 @@ The vocabulary of a project is the biggest lever for performance. The `@Contract
 
 ## Diagnosis
 
-<!-- if feedback -->
+<!-- if diagnostics -->
 *Encoding or proving?* `timings` gives the seconds per pipeline phase. If `translate` or `chop` dominates `verify`, the cause is encoding: shrink or split the member.
 
 *Whole-run Timeouts* The result's `members` says how far each member got: `passed` and `failed` ones finished (a failed one's errors are reported beside the timeout), the time went into the `inFlight` ones, and `notStarted` ones were never reached. The `TimeoutOccurred` diagnostic's `debug` payload carries `inFlight` (member, source line, kind and running time of each unfinished check), `slowestChecks` (the longest completed checks with their line, answer, reason and instantiation count) and `memberCheckTotals` (checks and milliseconds per member). One long in-flight or slow check is a single expensive query at that line: context or instantiation. Many short checks adding up in `memberCheckTotals` is a path explosion. Confirm with an `Assert(False)` before the named line: the run should then complete quickly.
@@ -32,26 +34,30 @@ The vocabulary of a project is the biggest lever for performance. The `@Contract
 <!-- end -->
 
 *Separating paths from context*:
-<!-- if feedback -->
+<!-- if diagnostics -->
+<!-- if budgets -->
 - Whole-run vs. assert timeout: If the assert timeout is set low, then a `TimeoutOccurred` for the whole run means the problem is almost certainly paths, whereas a single budget-bound check means one expensive query, so context or instantiation.
 - A budget-bound check shows `reasonUnknown` `canceled` or `unknown` with `rlimitDelta` at the cap.
 <!-- end -->
-
-<!-- if feedback -->
-- `reasonUnknown` `(incomplete quantifiers)` means the query did not close for lack of a fact: a debugging problem, not a performance one.
 <!-- end -->
+
+<!-- if diagnostics -->
+- `reasonUnknown` `(incomplete quantifiers)` means the query did not close for lack of a fact: a debugging problem, not a performance one.
 - You can also probe this with two `viper_args` (add `--disableCaching` so the cached result is not served back):
    - `--moreJoins 1` (join branches after impure conditionals) passes now → paths;
    - `--exhaleMode 0` (greedy heap reasoning) passes now → heap context.
    - neither passes → unclear.
+<!-- end -->
 
-<!-- if feedback -->
+<!-- if diagnostics -->
+<!-- if budgets -->
 ## Raising budgets
 Raised budgets are probes, not fixes. On a whole-run timeout, a single 2x `--timeout` re-run is a fair probe; beyond 2x more budget rarely helps. For a single budget-bound check, up to 10x the default `assertTimeout` is an acceptable fix if the check closes within it. Beyond these limits, try to decompose rather than re-budgeting.
 
 Try to keep escalations temporary: after the change it motivated, apply the fix catalog until the standard budgets carry it again. A member that can only iterate under escalated budgets will drag the rest of the verification down permanently: every later check of that member, and every verification of the module around it, runs slower from then on. Early in a program, while its shape can still change cheaply, restructuring is almost always the better trade. 
 
 Only for a very large or complex programs (for example more than 1,000 lines of code and spec), it may be necessary to leave members above the defaults after the fix catalog has been applied. There, a member that then verifies within 2x `--timeout` and 100x `assertTimeout` may stay at those budgets: record which members and which budgets in the log.
+<!-- end -->
 <!-- end -->
 
 ## The fix catalog
