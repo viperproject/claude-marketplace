@@ -33,6 +33,8 @@ The vocabulary of a project is the biggest lever for performance. The `@Contract
 *Whole-run Timeouts* Localize the cause of `TimeoutOccurred` by commenting out many proof obligations and adding them back until the run diverges again, or inserting `Assert(False)` before a suspect obligation. Everything after it verifies vacuously, so walking it down the body and diffing the durations shows which region the time belongs to.
 <!-- end -->
 
+*Out of memory* A crash (`verifier.crashed`) that says the prover ran out of memory is a whole-run timeout by another limit: localize and fix it the same way.
+
 *Separating paths from context*:
 <!-- if diagnostics -->
 <!-- if budgets -->

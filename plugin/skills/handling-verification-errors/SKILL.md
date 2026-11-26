@@ -34,7 +34,7 @@ First reduce the error to a single failing assertion:
 
 **For branches/multiple returns**: Do *not* assume which branch is the problem. Add asserts to each branch / before each return to find out which one fails.
 
-A whole-run timeout (`TimeoutOccurred`) is a performance problem, not a missing fact: switch to the `nagini-performance` skill and address it before resuming ordinary fix iteration.
+A whole-run timeout (`TimeoutOccurred`) is a performance problem, not a missing fact, and so is a crash (`verifier.crashed`) that says the prover ran out of memory: switch to the `nagini-performance` skill and address it before resuming ordinary fix iteration.
 
 **Separate conjunctions**: If the error occurs for a conjunction of properties, determine which clause is failing:
 - Multiple postconditions/invariants: assert each individually
